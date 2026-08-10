@@ -74,6 +74,14 @@ async function main(): Promise<void> {
       where: { slug: 'servidor-inicial' }, update: {},
       create: { slug: 'servidor-inicial', nombre: 'Servidor inicial', tipo: TipoProducto.SERVIDOR, descripcion: 'Infraestructura inicial para un proyecto digital.', precio: 399, duracionDias: 30, stock: null },
     }),
+    prisma.producto.upsert({
+      where: { slug: 'office-365-personal-anual' }, update: {},
+      create: { slug: 'office-365-personal-anual', nombre: 'Microsoft 365 Personal', tipo: TipoProducto.LICENCIA_OFFICE, descripcion: 'Licencia anual para una persona, con aplicaciones Office y almacenamiento en la nube.', precio: 1299, duracionDias: 365, stock: null },
+    }),
+    prisma.producto.upsert({
+      where: { slug: 'office-home-2024' }, update: {},
+      create: { slug: 'office-home-2024', nombre: 'Office Hogar 2024', tipo: TipoProducto.LICENCIA_OFFICE, descripcion: 'Licencia de compra única para Word, Excel, PowerPoint y OneNote.', precio: 2499, stock: null },
+    }),
   ]);
 
   await Promise.all([

@@ -1,6 +1,6 @@
 # Nexo Digital Marketplace
 
-Base inicial para una plataforma de servicios digitales: streaming, IA, educación, VPN, servidores, dominios y bots de Telegram.
+Plataforma de servicios digitales: streaming, IA, educación, VPN, servidores, dominios, licencias Office y bots de Telegram.
 
 ## 1. Requisitos
 
@@ -17,8 +17,8 @@ docker compose up --build
 ```
 
 - Frontend: `http://localhost:5173`
-- API: `http://localhost:3000/api`
-- Swagger: `http://localhost:3000/docs`
+- API: `http://localhost:3001/api`
+- Swagger: `http://localhost:3001/docs`
 - PostgreSQL y Redis permanecen en la red interna de Docker para no chocar con otros proyectos.
 
 En este flujo:
@@ -82,8 +82,8 @@ También dejé un Compose separado que genera las imágenes finales sin hot relo
 docker compose -f docker-compose.prod.yml up --build
 ```
 
-- Web: `http://localhost:4173`
-- API: `http://localhost:3000/api`
+- Web: `http://localhost` (o el puerto definido en `HTTP_PORT`)
+- API: se enruta por `/api` de forma interna; el puerto 3000 no queda expuesto.
 
 ## 5. Backend y base de datos
 
@@ -96,7 +96,7 @@ Endpoints disponibles:
 | GET | `/api/services` | Catálogo de servicios digitales. |
 | GET | `/api/services/featured` | Servicios destacados. |
 | GET | `/api/membership-levels` | Membresías con beneficios incluidos. |
-| GET | `/api/products` | Servidores, dominios y VPN. |
+| GET | `/api/products` | Servidores, dominios, VPN y licencias Office. |
 | GET | `/api/bot-functions` | Funciones disponibles para bots. |
 | POST | `/api/auth/register` | Crea una cuenta y abre sesión. |
 | POST | `/api/auth/login` | Inicia sesión; devuelve token y cookie de renovación. |
@@ -107,8 +107,10 @@ Endpoints disponibles:
 | POST | `/api/ecommerce-orders` | Crea una orden de infraestructura/productos. |
 | POST | `/api/bot-quotes` | Crea una cotización con precios congelados. |
 | POST | `/api/online-orders` | Calcula y registra un pedido online con comisión. |
-| POST | `/api/payments/checkout` | Crea la sesión Stripe Checkout de una orden pendiente. |
-| POST | `/api/payments/stripe/webhook` | Recibe la confirmación firmada de Stripe. |
+| POST | `/api/payments/transfer` | Genera referencia e instrucciones para transferencia. |
+| POST | `/api/payments/:paymentId/receipt` | Registra referencia bancaria y comprobante HTTPS. |
+| GET | `/api/payments/review-queue` | Lista comprobantes pendientes; solo ADMIN. |
+| POST | `/api/payments/:paymentId/review` | Aprueba o rechaza una transferencia; solo ADMIN. |
 
 Los `POST` de órdenes, cotizaciones, suscripciones y pagos requieren `Authorization: Bearer <accessToken>`. El frontend lo gestiona automáticamente después de iniciar sesión.
 
@@ -135,7 +137,7 @@ docker compose exec backend npx prisma migrate deploy
 └── README.md
 ```
 
-## 7. Configurar variables en el VPS y Stripe
+## 7. Transferencias y despliegue en VPS
 
 No subas archivos `.env` al repositorio. En el VPS crea un `.env` a partir de [`.env.example`](/Users/angelyama/Documents/Proyecto%20Ecommer/.env.example) y define, como mínimo:
 
@@ -144,13 +146,14 @@ FRONTEND_URL=https://tu-dominio.com
 JWT_ACCESS_SECRET=un_valor_largo_y_aleatorio
 JWT_REFRESH_SECRET=otro_valor_largo_y_aleatorio
 COOKIE_SECURE=true
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+TRANSFER_BANK_NAME=Nombre del banco
+TRANSFER_ACCOUNT_HOLDER=Nombre del beneficiario
+TRANSFER_ACCOUNT_NUMBER=
+TRANSFER_CLABE=
+TRANSFER_INSTRUCTIONS=
 ```
 
-En Stripe crea el endpoint `https://api.tu-dominio.com/api/payments/stripe/webhook` y habilita estos eventos: `checkout.session.completed`, `checkout.session.expired` y `payment_intent.payment_failed`. El backend verifica la firma usando el cuerpo crudo de la solicitud; no actives el cobro real hasta configurar esas dos claves y probar con claves `sk_test_`.
-
-La API crea el Checkout en el servidor y redirige al enlace que devuelve Stripe. Tras la confirmación firmada, cambia el pago a aprobado y activa la membresía o marca la orden como pagada. Esto sigue el flujo recomendado por [Stripe Checkout](https://docs.stripe.com/api/checkout/sessions/create?lang=nodejs) y su [verificación de webhooks](https://docs.stripe.com/webhooks/signature?lang=node).
+Stripe fue eliminado. Los servicios solo se activan después de que un administrador valide una transferencia y su comprobante. La guía completa de despliegue, alta de administrador, actualización y reversión está en [deploy/README.md](/Users/angelyama/Documents/Proyecto%20Ecommer/deploy/README.md).
 
 ## 8. Validación realizada
 

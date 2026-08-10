@@ -36,6 +36,7 @@ enum TipoProducto {
   SERVIDOR
   DOMINIO
   VPN
+  LICENCIA_OFFICE
   OTRO
 }
 
@@ -80,7 +81,6 @@ enum EstadoAsignacionCredencial {
 }
 
 enum MetodoPago {
-  STRIPE
   MERCADO_PAGO
   TRANSFERENCIA
   EFECTIVO
@@ -89,6 +89,7 @@ enum MetodoPago {
 
 enum EstadoPago {
   PENDIENTE
+  COMPROBANTE_ENVIADO
   APROBADO
   RECHAZADO
   REEMBOLSADO
@@ -440,7 +441,7 @@ model Pago {
   pedidoOnline     PedidoOnline?   @relation(fields: [pedidoOnlineId], references: [id])
   ordenTrabajoId   String?
   ordenTrabajo     OrdenTrabajo?   @relation(fields: [ordenTrabajoId], references: [id])
-  metodo           MetodoPago      @default(MERCADO_PAGO)
+  metodo           MetodoPago      @default(TRANSFERENCIA)
   estado           EstadoPago      @default(PENDIENTE)
   monto            Decimal         @db.Decimal(10, 2)
   moneda           String          @default("MXN") @db.Char(3)
@@ -449,9 +450,13 @@ model Pago {
   mpPaymentId      String?         @unique
   mpPreferenceId   String?
   mpStatusDetail   String?
-  stripeCheckoutSessionId String?  @unique
-  stripePaymentIntentId   String?  @unique
-  stripeStatus            String?
+  referenciaTransferencia String?
+  nombreOrdenante         String?
+  comprobanteUrl          String?
+  comprobanteEnviadoEn    DateTime?
+  validadoPorId           String?
+  validadoEn              DateTime?
+  notaValidacion          String?
   creadoEn         DateTime        @default(now())
   actualizadoEn    DateTime        @updatedAt
 

@@ -46,10 +46,13 @@ services:
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      TRANSFER_BANK_NAME: ${TRANSFER_BANK_NAME:-}
+      TRANSFER_ACCOUNT_HOLDER: ${TRANSFER_ACCOUNT_HOLDER:-}
+      TRANSFER_ACCOUNT_NUMBER: ${TRANSFER_ACCOUNT_NUMBER:-}
+      TRANSFER_CLABE: ${TRANSFER_CLABE:-}
+      TRANSFER_INSTRUCTIONS: ${TRANSFER_INSTRUCTIONS:-}
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ./backend:/app
       - nexo_backend_node_modules:/app/node_modules
@@ -73,7 +76,7 @@ services:
     container_name: nexo-frontend-dev
     restart: unless-stopped
     environment:
-      VITE_API_URL: http://localhost:3000/api
+      VITE_API_URL: http://localhost:3001/api
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "5173:5173"

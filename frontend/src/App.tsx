@@ -31,6 +31,7 @@ type User = { id: string; name: string; lastName: string | null; email: string; 
 type MembershipLevel = { id: string; name: string; description: string | null; monthlyPrice: number; currency: string; includedServices: { id: string; name: string }[] };
 type Product = { id: string; name: string; description: string | null; price: number; currency: string; type: string; durationDays: number | null };
 type BotFunction = { id: string; name: string; description: string | null; basePrice: number };
+type TransferPayment = { paymentId: string; reference: string; amount: number; currency: string; status: string; instructions: { bank: string; accountHolder: string; accountNumber?: string; clabe?: string; concept: string; additionalInstructions?: string } };
 type AuthMode = 'login' | 'register';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
@@ -96,6 +97,7 @@ function App() {
   const [authMode, setAuthMode] = useState<AuthMode | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedBotFunctions, setSelectedBotFunctions] = useState<string[]>([]);
+  const [transferPayment, setTransferPayment] = useState<TransferPayment | null>(null);
 
   useEffect(() => {
     api<ServiceItem[]>('/services').then(setServices).catch(() => undefined);
@@ -103,26 +105,23 @@ function App() {
     api<Product[]>('/products').then(setProducts).catch(() => undefined);
     api<BotFunction[]>('/bot-functions').then(setBotFunctions).catch(() => undefined);
     if (localStorage.getItem(ACCESS_TOKEN_KEY)) api<User>('/auth/me').then(setUser).catch(() => localStorage.removeItem(ACCESS_TOKEN_KEY));
-    const checkout = new URLSearchParams(window.location.search).get('checkout');
-    if (checkout === 'success') setNotice('Tu pago fue enviado a Stripe. Confirmaremos el servicio en cuanto llegue la validación.');
-    if (checkout === 'cancelled') setNotice('El pago fue cancelado; no se realizó ningún cargo.');
   }, []);
 
   const requireAccount = (action: () => void) => user ? action() : setAuthMode('login');
-  const checkout = async (resourceType: string, resourceId: string) => {
+  const requestTransfer = async (resourceType: string, resourceId: string) => {
     try {
-      const result = await api<{ checkoutUrl: string }>('/payments/checkout', { method: 'POST', body: JSON.stringify({ resourceType, resourceId }) });
-      window.location.assign(result.checkoutUrl);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible iniciar el pago.'); }
+      const result = await api<TransferPayment>('/payments/transfer', { method: 'POST', body: JSON.stringify({ resourceType, resourceId }) });
+      setTransferPayment(result);
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible preparar la transferencia.'); }
   };
   const subscribe = (levelId: string) => requireAccount(() => {
     api<{ id: string }>('/subscriptions', { method: 'POST', body: JSON.stringify({ levelId }) })
-      .then((subscription) => checkout('SUBSCRIPTION', subscription.id))
+      .then((subscription) => requestTransfer('SUBSCRIPTION', subscription.id))
       .catch((error: Error) => setNotice(error.message));
   });
   const buyProduct = (productId: string) => requireAccount(() => {
     api<{ id: string }>('/ecommerce-orders', { method: 'POST', body: JSON.stringify({ items: [{ productId, quantity: 1 }] }) })
-      .then((order) => checkout('ECOMMERCE_ORDER', order.id))
+      .then((order) => requestTransfer('ECOMMERCE_ORDER', order.id))
       .catch((error: Error) => setNotice(error.message));
   });
   const logout = async () => { await api<void>('/auth/logout', { method: 'POST' }).catch(() => undefined); localStorage.removeItem(ACCESS_TOKEN_KEY); setUser(null); };
@@ -208,26 +207,33 @@ function App() {
         <div className="section-heading"><div><span className="section-kicker">Compra con cuenta</span><h2>Elige, paga y<br /><em>listo.</em></h2></div></div>
         <div className="checkout-grid">
           <article className="checkout-panel"><h3>Membresías</h3><p>Tu suscripción se activa al confirmarse el pago.</p>{levels.length ? levels.map((level) => <div className="purchase-row" key={level.id}><div><strong>{level.name}</strong><small>{level.description}</small></div><button onClick={() => subscribe(level.id)}>${level.monthlyPrice} / mes</button></div>) : <small>Cargando planes…</small>}</article>
-          <article className="checkout-panel"><h3>Infraestructura</h3><p>VPN, dominios y servidores disponibles para comprar.</p>{products.length ? products.map((product) => <div className="purchase-row" key={product.id}><div><strong>{product.name}</strong><small>{product.description}</small></div><button onClick={() => buyProduct(product.id)}>Comprar ${product.price}</button></div>) : <small>Cargando productos…</small>}</article>
+          <article className="checkout-panel"><h3>Licencias y servicios</h3><p>Office, VPN, dominios y servidores con pago por transferencia.</p>{products.length ? products.map((product) => <div className="purchase-row" key={product.id}><div><strong>{product.name}</strong><small>{product.description}</small></div><button onClick={() => buyProduct(product.id)}>Transferir ${product.price}</button></div>) : <small>Cargando productos…</small>}</article>
         </div>
       </section>
 
       <section className="request-section shell" id="solicitudes">
-        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes del pago.</p><div className="function-list">{botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); api<{ id: string }>('/bot-quotes', { method: 'POST', body: JSON.stringify({ funcionIds: selectedBotFunctions }) }).then((quote) => checkout('BOT_QUOTE', quote.id)).catch((error: Error) => setNotice(error.message)); })}>Cotizar y pagar <ArrowUpRight size={17} /></button></article>
-        <OnlineOrderForm requireAccount={requireAccount} checkout={checkout} setNotice={setNotice} />
+        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes de solicitar la transferencia.</p><div className="function-list">{botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); api<{ id: string }>('/bot-quotes', { method: 'POST', body: JSON.stringify({ funcionIds: selectedBotFunctions }) }).then((quote) => requestTransfer('BOT_QUOTE', quote.id)).catch((error: Error) => setNotice(error.message)); })}>Cotizar y transferir <ArrowUpRight size={17} /></button></article>
+        <OnlineOrderForm requireAccount={requireAccount} requestTransfer={requestTransfer} setNotice={setNotice} />
       </section>
 
       <footer className="site-footer shell" id="ayuda"><div><a className="brand" href="#top"><span className="brand-mark">N</span><span>Nexo<span className="brand-dot">.</span></span></a><p>Servicios digitales para la vida real.</p></div><div className="footer-links"><a href="#servicios">Servicios</a><a href="#membresia">Membresías</a><a href="#solicitudes">Solicitudes</a><a href="mailto:hola@nexo.local">Contacto</a></div><span className="footer-year">© 2026 Nexo</span></footer>
       {notice && <div className="notice" role="status">{notice}<button aria-label="Cerrar" onClick={() => setNotice(null)}><X size={16} /></button></div>}
       {authMode && <AuthDialog mode={authMode} close={() => setAuthMode(null)} onSession={(session) => { localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken); setUser(session.user); setAuthMode(null); setNotice(`Bienvenida, ${session.user.name}. Tu cuenta está lista.`); }} />}
+      {transferPayment && <TransferDialog payment={transferPayment} close={() => setTransferPayment(null)} onSubmitted={(message) => { setTransferPayment(null); setNotice(message); }} />}
     </main>
   );
 }
 
-function OnlineOrderForm({ requireAccount, checkout, setNotice }: { requireAccount: (action: () => void) => void; checkout: (type: string, id: string) => Promise<void>; setNotice: (notice: string) => void }) {
+function OnlineOrderForm({ requireAccount, requestTransfer, setNotice }: { requireAccount: (action: () => void) => void; requestTransfer: (type: string, id: string) => Promise<void>; setNotice: (notice: string) => void }) {
   const [url, setUrl] = useState(''); const [amount, setAmount] = useState('');
-  const submit = (event: FormEvent) => { event.preventDefault(); requireAccount(() => { api<{ id: string; totalAmount: number }>('/online-orders', { method: 'POST', body: JSON.stringify({ urlProducto: url, montoProducto: Number(amount) }) }).then((order) => checkout('ONLINE_ORDER', order.id)).catch((error: Error) => setNotice(error.message)); }); };
-  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y llevamos tu pedido a pago seguro.</p><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit">Calcular y pagar <ArrowUpRight size={17} /></button></form></article>;
+  const submit = (event: FormEvent) => { event.preventDefault(); requireAccount(() => { api<{ id: string; totalAmount: number }>('/online-orders', { method: 'POST', body: JSON.stringify({ urlProducto: url, montoProducto: Number(amount) }) }).then((order) => requestTransfer('ONLINE_ORDER', order.id)).catch((error: Error) => setNotice(error.message)); }); };
+  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y validamos la transferencia antes de procesar tu pedido.</p><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit">Calcular transferencia <ArrowUpRight size={17} /></button></form></article>;
+}
+
+function TransferDialog({ payment, close, onSubmitted }: { payment: TransferPayment; close: () => void; onSubmitted: (message: string) => void }) {
+  const [transferReference, setTransferReference] = useState(''); const [senderName, setSenderName] = useState(''); const [receiptUrl, setReceiptUrl] = useState(''); const [note, setNote] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
+  const submit = async (event: FormEvent) => { event.preventDefault(); setLoading(true); setError(''); try { await api(`/payments/${payment.paymentId}/receipt`, { method: 'POST', body: JSON.stringify({ transferReference, senderName, receiptUrl, note: note || undefined }) }); onSubmitted('Comprobante enviado. Un administrador validará tu transferencia antes de activar el servicio.'); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'No fue posible enviar el comprobante.'); } finally { setLoading(false); } };
+  return <div className="modal-backdrop" role="presentation"><section className="transfer-dialog" role="dialog" aria-modal="true" aria-label="Pago por transferencia"><button className="modal-close" onClick={close} aria-label="Cerrar"><X size={18} /></button><span className="section-kicker">Pago por transferencia</span><h2>Tu referencia está lista.</h2><div className="transfer-summary"><span>Total a transferir</span><strong>${payment.amount.toLocaleString('es-MX')} {payment.currency}</strong><small>Concepto obligatorio: <b>{payment.instructions.concept}</b></small></div><dl className="bank-details"><div><dt>Banco</dt><dd>{payment.instructions.bank}</dd></div><div><dt>Beneficiario</dt><dd>{payment.instructions.accountHolder}</dd></div>{payment.instructions.accountNumber && <div><dt>Cuenta</dt><dd>{payment.instructions.accountNumber}</dd></div>}{payment.instructions.clabe && <div><dt>CLABE</dt><dd>{payment.instructions.clabe}</dd></div>}</dl>{payment.instructions.additionalInstructions && <p className="transfer-note">{payment.instructions.additionalInstructions}</p>}<form onSubmit={submit}><label>Referencia de la transferencia<input required minLength={4} maxLength={80} value={transferReference} onChange={(event) => setTransferReference(event.target.value)} /></label><label>Nombre de quien transfirió<input required maxLength={120} value={senderName} onChange={(event) => setSenderName(event.target.value)} /></label><label>Enlace HTTPS del comprobante<input required type="url" value={receiptUrl} placeholder="https://…" onChange={(event) => setReceiptUrl(event.target.value)} /></label><label>Nota opcional<input maxLength={300} value={note} onChange={(event) => setNote(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loading} type="submit">{loading ? 'Enviando…' : 'Enviar comprobante'} <ArrowUpRight size={17} /></button></form></section></div>;
 }
 
 function AuthDialog({ mode, close, onSession }: { mode: AuthMode; close: () => void; onSession: (session: { accessToken: string; user: User }) => void }) {

@@ -4,13 +4,13 @@ services:
     container_name: nexo-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-marketplace}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketplace_dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-marketplace}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER es obligatorio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB es obligatorio}
     volumes:
       - nexo_postgres_data_prod:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-marketplace} -d ${POSTGRES_DB:-marketplace}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:?POSTGRES_USER es obligatorio} -d ${POSTGRES_DB:?POSTGRES_DB es obligatorio}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -27,6 +27,28 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    image: nexo-backend-migrate:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: builder
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER es obligatorio}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB es obligatorio}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  seed:
+    image: nexo-backend-migrate:local
+    command: ["npm", "run", "prisma:seed"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER es obligatorio}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB es obligatorio}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   backend:
     image: nexo-backend:local
     build:
@@ -38,19 +60,24 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:-marketplace_dev_password}@postgres:5432/${POSTGRES_DB:-marketplace}
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER es obligatorio}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB es obligatorio}
       REDIS_URL: redis://redis:6379
-      FRONTEND_URL: ${FRONTEND_URL}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL:?FRONTEND_URL es obligatorio}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET es obligatorio}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET es obligatorio}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
-    ports:
-      - "3000:3000"
+      TRANSFER_BANK_NAME: ${TRANSFER_BANK_NAME:?TRANSFER_BANK_NAME es obligatorio}
+      TRANSFER_ACCOUNT_HOLDER: ${TRANSFER_ACCOUNT_HOLDER:?TRANSFER_ACCOUNT_HOLDER es obligatorio}
+      TRANSFER_ACCOUNT_NUMBER: ${TRANSFER_ACCOUNT_NUMBER:-}
+      TRANSFER_CLABE: ${TRANSFER_CLABE:-}
+      TRANSFER_INSTRUCTIONS: ${TRANSFER_INSTRUCTIONS:-}
     depends_on:
+      seed:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -68,14 +95,19 @@ services:
       dockerfile: Dockerfile
       target: runner
       args:
-        VITE_API_URL: http://localhost:3000/api
+        VITE_API_URL: ${VITE_API_URL:-/api}
     container_name: nexo-frontend
     restart: unless-stopped
     ports:
-      - "4173:80"
+      - "${HTTP_PORT:-80}:80"
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   nexo_postgres_data_prod:
