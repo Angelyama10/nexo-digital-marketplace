@@ -1,0 +1,479 @@
+// Marketplace de servicios digitales B2B/B2C.
+// Las contraseñas y PIN de proveedores se guardan cifrados; las claves viven fuera de la base de datos.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolUsuario {
+  CLIENTE
+  ADMIN
+  SOPORTE
+}
+
+enum EstadoSuscripcion {
+  ACTIVA
+  VENCIDA
+  CANCELADA
+  PENDIENTE_PAGO
+}
+
+enum EstadoOrden {
+  PENDIENTE
+  PAGADA
+  EN_PROCESO
+  COMPLETADA
+  CANCELADA
+  REEMBOLSADA
+}
+
+enum TipoProducto {
+  SERVIDOR
+  DOMINIO
+  VPN
+  OTRO
+}
+
+enum CategoriaServicioDigital {
+  STREAMING
+  EDUCATIVO
+  IA
+  OTRO
+}
+
+enum EstadoPedidoOnline {
+  SOLICITADO
+  COTIZADO
+  PAGADO
+  COMPRADO
+  ENVIADO
+  ENTREGADO
+  CANCELADO
+}
+
+enum EstadoCotizacionBot {
+  BORRADOR
+  ENVIADA
+  APROBADA
+  RECHAZADA
+  EXPIRADA
+  CONVERTIDA_ORDEN
+}
+
+enum EstadoOrdenTrabajo {
+  PENDIENTE
+  EN_DESARROLLO
+  EN_REVISION
+  ENTREGADA
+  CANCELADA
+}
+
+enum EstadoAsignacionCredencial {
+  ACTIVA
+  LIBERADA
+  REVOCADA
+}
+
+enum MetodoPago {
+  STRIPE
+  MERCADO_PAGO
+  TRANSFERENCIA
+  EFECTIVO
+  OTRO
+}
+
+enum EstadoPago {
+  PENDIENTE
+  APROBADO
+  RECHAZADO
+  REEMBOLSADO
+  EN_MEDIACION
+}
+
+enum OrigenPago {
+  SUSCRIPCION
+  ORDEN_ECOMMERCE
+  PEDIDO_ONLINE
+  ORDEN_TRABAJO
+}
+
+enum EstadoWebhook {
+  RECIBIDO
+  PROCESADO
+  ERROR
+}
+
+model Usuario {
+  id               String     @id @default(uuid())
+  nombre           String
+  apellido         String?
+  email            String     @unique
+  emailNormalizado String     @unique
+  telefono         String?
+  passwordHash     String
+  rol              RolUsuario @default(CLIENTE)
+  activo           Boolean    @default(true)
+  verificadoEn     DateTime?
+  ultimoAccesoEn   DateTime?
+  creadoEn         DateTime   @default(now())
+  actualizadoEn    DateTime   @updatedAt
+
+  suscripciones           Suscripcion[]
+  ordenesEcommerce        OrdenEcommerce[]
+  pedidosOnline           PedidoOnline[]
+  cotizacionesBot         CotizacionBot[]
+  accesosCredencial       AsignacionCredencial[]
+  pagos                   Pago[]
+  sesiones                Sesion[]
+  ordenesTrabajoAsignadas OrdenTrabajo[]         @relation("OrdenesTrabajoAsignadas")
+
+  @@index([rol, activo])
+  @@map("usuarios")
+}
+
+model Sesion {
+  id               String   @id @default(uuid())
+  usuarioId        String
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  refreshTokenHash String
+  expiraEn         DateTime
+  revocadoEn       DateTime?
+  userAgent        String?
+  ip               String?
+  creadoEn         DateTime @default(now())
+  actualizadoEn    DateTime @updatedAt
+
+  @@index([usuarioId, revocadoEn])
+  @@index([expiraEn])
+  @@map("sesiones")
+}
+
+model NivelMembresia {
+  id            String   @id @default(uuid())
+  nombre        String   @unique
+  descripcion   String?
+  precioMensual Decimal  @db.Decimal(10, 2)
+  moneda        String   @default("MXN") @db.Char(3)
+  activo        Boolean  @default(true)
+  orden         Int      @default(0)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  suscripciones      Suscripcion[]
+  serviciosIncluidos NivelServicioDigital[]
+
+  @@map("niveles_membresia")
+}
+
+model Suscripcion {
+  id                    String            @id @default(uuid())
+  usuarioId             String
+  usuario               Usuario           @relation(fields: [usuarioId], references: [id])
+  nivelId               String
+  nivel                 NivelMembresia    @relation(fields: [nivelId], references: [id])
+  estado                EstadoSuscripcion @default(PENDIENTE_PAGO)
+  precioMensualAplicado Decimal           @db.Decimal(10, 2)
+  moneda                String            @default("MXN") @db.Char(3)
+  fechaInicio           DateTime          @default(now())
+  periodoActualInicio   DateTime          @default(now())
+  fechaCorte            DateTime
+  fechaCancelacion      DateTime?
+  renovAutomatica       Boolean           @default(true)
+  creadoEn              DateTime          @default(now())
+  actualizadoEn         DateTime          @updatedAt
+
+  pagos             Pago[]
+  accesosCredencial AsignacionCredencial[]
+
+  @@index([usuarioId, estado])
+  @@index([estado, fechaCorte])
+  @@map("suscripciones")
+}
+
+model ServicioDigital {
+  id             String                   @id @default(uuid())
+  slug           String                   @unique
+  nombre         String
+  categoria      CategoriaServicioDigital
+  descripcion    String?
+  precioDesde    Decimal                  @db.Decimal(10, 2)
+  precioEtiqueta String
+  acento         String                   @default("blue")
+  destacado      Boolean                  @default(false)
+  orden          Int                      @default(0)
+  activo         Boolean                  @default(true)
+  creadoEn       DateTime                 @default(now())
+  actualizadoEn  DateTime                 @updatedAt
+
+  credenciales     Credencial[]
+  nivelesMembresia NivelServicioDigital[]
+
+  @@index([activo, destacado, orden])
+  @@map("servicios_digitales")
+}
+
+model NivelServicioDigital {
+  id             String          @id @default(uuid())
+  nivelId        String
+  nivel          NivelMembresia  @relation(fields: [nivelId], references: [id])
+  servicioId     String
+  servicio       ServicioDigital @relation(fields: [servicioId], references: [id])
+  cuposIncluidos Int             @default(1)
+  orden          Int             @default(0)
+
+  @@unique([nivelId, servicioId])
+  @@index([servicioId])
+  @@map("nivel_servicio_digital")
+}
+
+model Credencial {
+  id              String          @id @default(uuid())
+  servicioId      String
+  servicio        ServicioDigital @relation(fields: [servicioId], references: [id])
+  emailCuenta     String
+  passwordCifrado String
+  perfilesMax     Int             @default(1)
+  notas           String?
+  activa          Boolean         @default(true)
+  creadoEn        DateTime        @default(now())
+  actualizadoEn   DateTime        @updatedAt
+
+  asignaciones AsignacionCredencial[]
+
+  @@unique([servicioId, emailCuenta])
+  @@index([servicioId, activa])
+  @@map("credenciales")
+}
+
+model AsignacionCredencial {
+  id               String                     @id @default(uuid())
+  credencialId     String
+  credencial       Credencial                 @relation(fields: [credencialId], references: [id])
+  usuarioId        String
+  usuario          Usuario                    @relation(fields: [usuarioId], references: [id])
+  suscripcionId    String?
+  suscripcion      Suscripcion?               @relation(fields: [suscripcionId], references: [id])
+  perfilAsignado   Int?
+  pinPerfilCifrado String?
+  estado           EstadoAsignacionCredencial @default(ACTIVA)
+  fechaAsignacion  DateTime                   @default(now())
+  fechaLiberacion  DateTime?
+  creadoEn         DateTime                   @default(now())
+  actualizadoEn    DateTime                   @updatedAt
+
+  @@index([credencialId, estado])
+  @@index([usuarioId, estado])
+  @@index([suscripcionId])
+  @@map("asignaciones_credenciales")
+}
+
+model Producto {
+  id            String       @id @default(uuid())
+  slug          String       @unique
+  nombre        String
+  tipo          TipoProducto
+  descripcion   String?
+  imagenUrl     String?
+  precio        Decimal      @db.Decimal(10, 2)
+  moneda        String       @default("MXN") @db.Char(3)
+  duracionDias  Int?
+  stock         Int?
+  activo        Boolean      @default(true)
+  creadoEn      DateTime     @default(now())
+  actualizadoEn DateTime     @updatedAt
+
+  itemsOrden ItemOrdenEcommerce[]
+
+  @@index([tipo, activo])
+  @@map("productos")
+}
+
+model OrdenEcommerce {
+  id            String      @id @default(uuid())
+  referencia    String      @unique
+  usuarioId     String
+  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
+  estado        EstadoOrden @default(PENDIENTE)
+  subtotal      Decimal     @db.Decimal(10, 2)
+  descuento     Decimal     @default(0) @db.Decimal(10, 2)
+  impuestos     Decimal     @default(0) @db.Decimal(10, 2)
+  envio         Decimal     @default(0) @db.Decimal(10, 2)
+  total         Decimal     @db.Decimal(10, 2)
+  moneda        String      @default("MXN") @db.Char(3)
+  creadoEn      DateTime    @default(now())
+  actualizadoEn DateTime    @updatedAt
+
+  items ItemOrdenEcommerce[]
+  pagos Pago[]
+
+  @@index([usuarioId, estado])
+  @@index([estado, creadoEn])
+  @@map("ordenes_ecommerce")
+}
+
+model ItemOrdenEcommerce {
+  id             String         @id @default(uuid())
+  ordenId        String
+  orden          OrdenEcommerce @relation(fields: [ordenId], references: [id])
+  productoId     String
+  producto       Producto       @relation(fields: [productoId], references: [id])
+  nombreProducto String
+  cantidad       Int            @default(1)
+  precioUnit     Decimal        @db.Decimal(10, 2)
+
+  @@index([ordenId])
+  @@index([productoId])
+  @@map("items_orden_ecommerce")
+}
+
+model PedidoOnline {
+  id                 String             @id @default(uuid())
+  referencia         String             @unique
+  usuarioId          String
+  usuario            Usuario            @relation(fields: [usuarioId], references: [id])
+  urlProducto        String
+  tienda             String?
+  descripcion        String?
+  montoProducto      Decimal            @db.Decimal(10, 2)
+  porcentajeComision Decimal            @default(15.00) @db.Decimal(5, 2)
+  montoComision      Decimal            @db.Decimal(10, 2)
+  montoEnvio         Decimal            @default(0) @db.Decimal(10, 2)
+  montoTotal         Decimal            @db.Decimal(10, 2)
+  moneda             String             @default("MXN") @db.Char(3)
+  vigenteHasta       DateTime?
+  estado             EstadoPedidoOnline @default(SOLICITADO)
+  creadoEn           DateTime           @default(now())
+  actualizadoEn      DateTime           @updatedAt
+
+  pagos Pago[]
+
+  @@index([usuarioId, estado])
+  @@index([estado, creadoEn])
+  @@map("pedidos_online")
+}
+
+model FuncionBot {
+  id            String   @id @default(uuid())
+  slug          String   @unique
+  nombre        String   @unique
+  descripcion   String?
+  precioBase    Decimal  @db.Decimal(10, 2)
+  activo        Boolean  @default(true)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  cotizacionFunciones CotizacionBotFuncion[]
+
+  @@map("funciones_bot")
+}
+
+model CotizacionBot {
+  id            String              @id @default(uuid())
+  referencia    String              @unique
+  usuarioId     String
+  usuario       Usuario             @relation(fields: [usuarioId], references: [id])
+  descripcion   String?
+  metadata      Json?
+  totalEstimado Decimal             @db.Decimal(10, 2)
+  moneda        String              @default("MXN") @db.Char(3)
+  vigenteHasta  DateTime?
+  estado        EstadoCotizacionBot @default(BORRADOR)
+  creadoEn      DateTime            @default(now())
+  actualizadoEn DateTime            @updatedAt
+
+  funciones    CotizacionBotFuncion[]
+  ordenTrabajo OrdenTrabajo?
+
+  @@index([usuarioId, estado])
+  @@map("cotizaciones_bot")
+}
+
+model CotizacionBotFuncion {
+  id             String        @id @default(uuid())
+  cotizacionId   String
+  cotizacion     CotizacionBot @relation(fields: [cotizacionId], references: [id])
+  funcionId      String
+  funcion        FuncionBot    @relation(fields: [funcionId], references: [id])
+  precioAplicado Decimal       @db.Decimal(10, 2)
+
+  @@unique([cotizacionId, funcionId])
+  @@index([funcionId])
+  @@map("cotizacion_bot_funciones")
+}
+
+model OrdenTrabajo {
+  id            String             @id @default(uuid())
+  cotizacionId  String             @unique
+  cotizacion    CotizacionBot      @relation(fields: [cotizacionId], references: [id])
+  asignadoAId   String?
+  asignadoA     Usuario?           @relation("OrdenesTrabajoAsignadas", fields: [asignadoAId], references: [id])
+  estado        EstadoOrdenTrabajo @default(PENDIENTE)
+  fechaEntrega  DateTime?
+  entregableUrl String?
+  notas         String?
+  creadoEn      DateTime           @default(now())
+  actualizadoEn DateTime           @updatedAt
+
+  pagos Pago[]
+
+  @@index([asignadoAId, estado])
+  @@map("ordenes_trabajo")
+}
+
+model Pago {
+  id               String          @id @default(uuid())
+  referencia       String          @unique
+  idempotencyKey   String?         @unique
+  usuarioId        String
+  usuario          Usuario         @relation(fields: [usuarioId], references: [id])
+  origen           OrigenPago
+  suscripcionId    String?
+  suscripcion      Suscripcion?    @relation(fields: [suscripcionId], references: [id])
+  ordenEcommerceId String?
+  ordenEcommerce   OrdenEcommerce? @relation(fields: [ordenEcommerceId], references: [id])
+  pedidoOnlineId   String?
+  pedidoOnline     PedidoOnline?   @relation(fields: [pedidoOnlineId], references: [id])
+  ordenTrabajoId   String?
+  ordenTrabajo     OrdenTrabajo?   @relation(fields: [ordenTrabajoId], references: [id])
+  metodo           MetodoPago      @default(MERCADO_PAGO)
+  estado           EstadoPago      @default(PENDIENTE)
+  monto            Decimal         @db.Decimal(10, 2)
+  moneda           String          @default("MXN") @db.Char(3)
+  periodoInicio    DateTime?
+  periodoFin       DateTime?
+  mpPaymentId      String?         @unique
+  mpPreferenceId   String?
+  mpStatusDetail   String?
+  stripeCheckoutSessionId String?  @unique
+  stripePaymentIntentId   String?  @unique
+  stripeStatus            String?
+  creadoEn         DateTime        @default(now())
+  actualizadoEn    DateTime        @updatedAt
+
+  @@index([usuarioId, estado])
+  @@index([suscripcionId])
+  @@index([ordenEcommerceId])
+  @@index([pedidoOnlineId])
+  @@index([ordenTrabajoId])
+  @@map("pagos")
+}
+
+model WebhookEvento {
+  id              String        @id @default(uuid())
+  proveedor       String        @default("MERCADO_PAGO")
+  eventoExternoId String        @unique
+  tipo            String
+  payload         Json
+  estado          EstadoWebhook @default(RECIBIDO)
+  error           String?
+  recibidoEn      DateTime      @default(now())
+  procesadoEn     DateTime?
+
+  @@index([estado, recibidoEn])
+  @@map("webhooks_eventos")
+}

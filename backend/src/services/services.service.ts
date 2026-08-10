@@ -1,72 +1,54 @@
 import { Injectable } from '@nestjs/common';
+import { CategoriaServicioDigital } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { ServiceItem } from './entities/service-item.entity';
 
 @Injectable()
 export class ServicesService {
-  private readonly catalog: ServiceItem[] = [
-    {
-      id: 'streaming-packs',
-      name: 'Packs de streaming',
-      category: 'streaming',
-      description: 'Accesos y planes organizados con soporte humano.',
-      priceFrom: 89,
-      priceLabel: 'Desde $89 MXN / mes',
-      accent: 'coral',
-      featured: true,
-    },
-    {
-      id: 'ai-workspace',
-      name: 'IA para trabajar',
-      category: 'ai',
-      description: 'Herramientas y configuraciones para crear más rápido.',
-      priceFrom: 149,
-      priceLabel: 'Desde $149 MXN / mes',
-      accent: 'blue',
-      featured: true,
-    },
-    {
-      id: 'learning-club',
-      name: 'Suscripciones educativas',
-      category: 'education',
-      description: 'Bibliotecas, cursos y recursos para seguir aprendiendo.',
-      priceFrom: 129,
-      priceLabel: 'Desde $129 MXN / mes',
-      accent: 'yellow',
-    },
-    {
-      id: 'vpn-shield',
-      name: 'VPN Shield',
-      category: 'infrastructure',
-      description: 'Conexión privada para tus dispositivos y equipos.',
-      priceFrom: 99,
-      priceLabel: 'Desde $99 MXN / mes',
-      accent: 'mint',
-    },
-    {
-      id: 'servers-domains',
-      name: 'Servidores y dominios',
-      category: 'infrastructure',
-      description: 'Infraestructura lista para proyectos personales o negocios.',
-      priceFrom: 249,
-      priceLabel: 'Desde $249 MXN',
-      accent: 'blue',
-    },
-    {
-      id: 'telegram-bots',
-      name: 'Bots de Telegram',
-      category: 'automation',
-      description: 'Automatizaciones a la medida para vender, avisar y operar.',
-      priceFrom: 799,
-      priceLabel: 'Cotización desde $799 MXN',
-      accent: 'coral',
-    },
-  ];
+  constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): ServiceItem[] {
-    return this.catalog;
+  async findAll(): Promise<ServiceItem[]> {
+    const catalog = await this.prisma.servicioDigital.findMany({
+      where: { activo: true },
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    });
+
+    return catalog.map((service) => this.toPublicItem(service));
   }
 
-  findFeatured(): ServiceItem[] {
-    return this.catalog.filter((service) => service.featured);
+  async findFeatured(): Promise<ServiceItem[]> {
+    const catalog = await this.prisma.servicioDigital.findMany({
+      where: { activo: true, destacado: true },
+      orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
+    });
+
+    return catalog.map((service) => this.toPublicItem(service));
+  }
+
+  private toPublicItem(service: {
+    id: string; slug: string; nombre: string; categoria: CategoriaServicioDigital; descripcion: string | null;
+    precioDesde: { toNumber(): number }; precioEtiqueta: string; acento: string; destacado: boolean;
+  }): ServiceItem {
+    return {
+      id: service.slug,
+      name: service.nombre,
+      category: this.mapCategory(service.categoria),
+      description: service.descripcion ?? '',
+      priceFrom: service.precioDesde.toNumber(),
+      priceLabel: service.precioEtiqueta,
+      accent: service.acento,
+      featured: service.destacado,
+    };
+  }
+
+  private mapCategory(category: CategoriaServicioDigital): ServiceItem['category'] {
+    const categories: Record<CategoriaServicioDigital, ServiceItem['category']> = {
+      STREAMING: 'streaming',
+      IA: 'ai',
+      EDUCATIVO: 'education',
+      OTRO: 'automation',
+    };
+
+    return categories[category];
   }
 }

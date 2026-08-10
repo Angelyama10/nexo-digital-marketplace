@@ -7,8 +7,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-marketplace}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketplace_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-marketplace}
-    ports:
-      - "5432:5432"
     volumes:
       - nexo_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +19,6 @@ services:
     image: redis:7.4.9-alpine
     container_name: nexo-redis-dev
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     volumes:
       - nexo_redis_data:/data
     healthcheck:
@@ -44,6 +40,14 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-marketplace}:${POSTGRES_PASSWORD:-marketplace_dev_password}@postgres:5432/${POSTGRES_DB:-marketplace}
       REDIS_URL: redis://redis:6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-development-only-change-before-deploy}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-local-development-refresh-only-change-before-deploy}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     ports:
       - "3000:3000"
     volumes:

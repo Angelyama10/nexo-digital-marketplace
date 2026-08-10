@@ -19,8 +19,7 @@ docker compose up --build
 - Frontend: `http://localhost:5173`
 - API: `http://localhost:3000/api`
 - Swagger: `http://localhost:3000/docs`
-- PostgreSQL: puerto `5432`
-- Redis: puerto `6379`
+- PostgreSQL y Redis permanecen en la red interna de Docker para no chocar con otros proyectos.
 
 En este flujo:
 
@@ -29,10 +28,11 @@ En este flujo:
 - `npm run dev:frontend` se ejecuta automáticamente dentro del contenedor `nexo-frontend-dev`.
 - Los directorios del proyecto se montan en los contenedores para conservar hot reload.
 
-Si modificas un `package.json`, reconstruye las imágenes:
+Si modificas un `package.json`, instala las dependencias dentro del contenedor correspondiente y reinícialo:
 
 ```bash
-docker compose up --build
+docker compose exec backend npm install
+docker compose restart backend
 ```
 
 Para ejecutarlo en segundo plano:
@@ -85,7 +85,47 @@ docker compose -f docker-compose.prod.yml up --build
 - Web: `http://localhost:4173`
 - API: `http://localhost:3000/api`
 
-## 5. Estructura
+## 5. Backend y base de datos
+
+El esquema Prisma está en `backend/prisma/schema.prisma`. Al iniciar, PostgreSQL contiene el catálogo, productos, membresías y funciones de bot iniciales.
+
+Endpoints disponibles:
+
+| Método | Endpoint | Función |
+| --- | --- | --- |
+| GET | `/api/services` | Catálogo de servicios digitales. |
+| GET | `/api/services/featured` | Servicios destacados. |
+| GET | `/api/membership-levels` | Membresías con beneficios incluidos. |
+| GET | `/api/products` | Servidores, dominios y VPN. |
+| GET | `/api/bot-functions` | Funciones disponibles para bots. |
+| POST | `/api/auth/register` | Crea una cuenta y abre sesión. |
+| POST | `/api/auth/login` | Inicia sesión; devuelve token y cookie de renovación. |
+| POST | `/api/auth/refresh` | Rota el token de renovación HttpOnly. |
+| POST | `/api/auth/logout` | Revoca la sesión actual. |
+| GET | `/api/auth/me` | Devuelve el perfil autenticado. |
+| POST | `/api/subscriptions` | Crea una membresía pendiente de pago. |
+| POST | `/api/ecommerce-orders` | Crea una orden de infraestructura/productos. |
+| POST | `/api/bot-quotes` | Crea una cotización con precios congelados. |
+| POST | `/api/online-orders` | Calcula y registra un pedido online con comisión. |
+| POST | `/api/payments/checkout` | Crea la sesión Stripe Checkout de una orden pendiente. |
+| POST | `/api/payments/stripe/webhook` | Recibe la confirmación firmada de Stripe. |
+
+Los `POST` de órdenes, cotizaciones, suscripciones y pagos requieren `Authorization: Bearer <accessToken>`. El frontend lo gestiona automáticamente después de iniciar sesión.
+
+Para crear una nueva migración durante desarrollo (desde una terminal real con TTY):
+
+```bash
+docker compose exec -it backend npx prisma migrate dev --name nombre_del_cambio
+docker compose exec backend npm run prisma:seed
+```
+
+Para aplicar migraciones existentes en un VPS o un contenedor no interactivo:
+
+```bash
+docker compose exec backend npx prisma migrate deploy
+```
+
+## 6. Estructura
 
 ```text
 .
@@ -95,9 +135,31 @@ docker compose -f docker-compose.prod.yml up --build
 └── README.md
 ```
 
-Esta primera etapa usa un catálogo temporal en memoria para que la interfaz sea visible desde el primer día. La siguiente etapa puede conectar Prisma, migraciones PostgreSQL, usuarios, inventario de accesos, Mercado Pago y panel administrativo.
+## 7. Configurar variables en el VPS y Stripe
 
-## 6. Comandos dentro de Docker
+No subas archivos `.env` al repositorio. En el VPS crea un `.env` a partir de [`.env.example`](/Users/angelyama/Documents/Proyecto%20Ecommer/.env.example) y define, como mínimo:
+
+```env
+FRONTEND_URL=https://tu-dominio.com
+JWT_ACCESS_SECRET=un_valor_largo_y_aleatorio
+JWT_REFRESH_SECRET=otro_valor_largo_y_aleatorio
+COOKIE_SECURE=true
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+En Stripe crea el endpoint `https://api.tu-dominio.com/api/payments/stripe/webhook` y habilita estos eventos: `checkout.session.completed`, `checkout.session.expired` y `payment_intent.payment_failed`. El backend verifica la firma usando el cuerpo crudo de la solicitud; no actives el cobro real hasta configurar esas dos claves y probar con claves `sk_test_`.
+
+La API crea el Checkout en el servidor y redirige al enlace que devuelve Stripe. Tras la confirmación firmada, cambia el pago a aprobado y activa la membresía o marca la orden como pagada. Esto sigue el flujo recomendado por [Stripe Checkout](https://docs.stripe.com/api/checkout/sessions/create?lang=nodejs) y su [verificación de webhooks](https://docs.stripe.com/webhooks/signature?lang=node).
+
+## 8. Validación realizada
+
+- `docker compose config --quiet`
+- Compilación de frontend (`npm run build`)
+- Compilación de backend (`npm run build`)
+- 5 suites y 6 pruebas unitarias del backend aprobadas.
+
+## 9. Comandos dentro de Docker
 
 Si necesitas entrar manualmente a un contenedor, usa estos comandos desde la raíz:
 
