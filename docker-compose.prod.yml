@@ -108,7 +108,7 @@ services:
       retries: 10
 
   caddy:
-    image: caddy:2.11.0-alpine
+    image: caddy:2.11.4-alpine
     container_name: nexo-caddy
     restart: unless-stopped
     environment:
