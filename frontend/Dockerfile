@@ -2,7 +2,9 @@ FROM node:22-alpine AS development
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+# Rollup distribuye binarios opcionales por arquitectura. Ignoramos el lock
+# generado en otra plataforma para resolver el binario correcto en cada imagen.
+RUN npm install --include=optional --package-lock=false
 COPY . .
 
 EXPOSE 5173
@@ -12,7 +14,9 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+# El VPS usa Linux x64, mientras que el entorno local puede ser ARM.
+# Así npm instala el binario nativo de Rollup correspondiente al contenedor.
+RUN npm install --include=optional --package-lock=false
 COPY . .
 ARG VITE_API_URL=http://localhost:3000/api
 ENV VITE_API_URL=$VITE_API_URL
