@@ -6,7 +6,9 @@ RUN npm ci
 COPY . .
 
 EXPOSE 3000
-CMD ["sh", "-c", "npm run prisma:generate && npm run dev:backend"]
+# El código y node_modules se montan como volúmenes durante desarrollo. Esta
+# comprobación sincroniza dependencias y Prisma cuando cambia el repositorio.
+CMD ["sh", "-c", "npm install --include=dev && npm run prisma:generate && npm run dev:backend"]
 
 FROM node:22-alpine AS builder
 

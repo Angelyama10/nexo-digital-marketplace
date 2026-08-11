@@ -8,7 +8,9 @@ RUN npm install --include=optional --package-lock=false
 COPY . .
 
 EXPOSE 5173
-CMD ["npm", "run", "dev:frontend"]
+# El volumen de desarrollo puede sobrevivir a cambios del package.json. npm
+# vuelve a sincronizarlo y resuelve el binario opcional correcto de Rollup.
+CMD ["sh", "-c", "npm install --include=optional --package-lock=false && npm run dev:frontend"]
 
 FROM node:22-alpine AS builder
 

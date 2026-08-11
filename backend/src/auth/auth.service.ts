@@ -1,10 +1,11 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Usuario } from '@prisma/client';
+import { Prisma, Usuario } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthResponseDto, UserProfileDto } from './dto/auth-response.dto';
+import { AuthRateLimiterService } from './auth-rate-limiter.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthenticatedUser } from './types/authenticated-user.type';
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly rateLimiter: AuthRateLimiterService,
   ) {}
 
   async register(dto: RegisterDto, context: SessionContext): Promise<TokenBundle> {
@@ -30,20 +32,31 @@ export class AuthService {
     }
 
     const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
-    const user = await this.prisma.usuario.create({
-      data: { nombre: dto.nombre.trim(), apellido: dto.apellido?.trim(), email, emailNormalizado: email, passwordHash },
-    });
+    let user: Usuario;
+    try {
+      user = await this.prisma.usuario.create({
+        data: { nombre: dto.nombre.trim(), apellido: dto.apellido?.trim(), email, emailNormalizado: email, passwordHash },
+      });
+    } catch (error: unknown) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Ya existe una cuenta con ese correo.');
+      }
+      throw error;
+    }
     return this.createSession(user, context);
   }
 
   async login(dto: LoginDto, context: SessionContext): Promise<TokenBundle> {
     const email = dto.email.toLowerCase();
+    this.rateLimiter.assertLoginAllowed(email, context.ip);
     const user = await this.prisma.usuario.findUnique({ where: { emailNormalizado: email } });
     const isValid = user?.activo ? await this.isPasswordValid(user.passwordHash, dto.password) : false;
     if (!isValid || !user) {
+      this.rateLimiter.recordLoginFailure(email, context.ip);
       throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
 
+    this.rateLimiter.clearLoginFailures(email, context.ip);
     await this.prisma.usuario.update({ where: { id: user.id }, data: { ultimoAccesoEn: new Date() } });
     return this.createSession(user, context);
   }

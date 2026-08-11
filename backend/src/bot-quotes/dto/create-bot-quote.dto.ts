@@ -1,11 +1,12 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, ArrayUnique, IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateBotQuoteDto {
   @ApiProperty({ type: [String], format: 'uuid', minItems: 1 })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(25)
   @ArrayUnique()
   @IsUUID('4', { each: true })
   @Type(() => String)

@@ -138,16 +138,16 @@ model Usuario {
 }
 
 model Sesion {
-  id               String   @id @default(uuid())
+  id               String    @id @default(uuid())
   usuarioId        String
-  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuario          Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   refreshTokenHash String
   expiraEn         DateTime
   revocadoEn       DateTime?
   userAgent        String?
   ip               String?
-  creadoEn         DateTime @default(now())
-  actualizadoEn    DateTime @updatedAt
+  creadoEn         DateTime  @default(now())
+  actualizadoEn    DateTime  @updatedAt
 
   @@index([usuarioId, revocadoEn])
   @@index([expiraEn])
@@ -172,25 +172,28 @@ model NivelMembresia {
 }
 
 model Suscripcion {
-  id                    String            @id @default(uuid())
-  usuarioId             String
-  usuario               Usuario           @relation(fields: [usuarioId], references: [id])
-  nivelId               String
-  nivel                 NivelMembresia    @relation(fields: [nivelId], references: [id])
-  estado                EstadoSuscripcion @default(PENDIENTE_PAGO)
-  precioMensualAplicado Decimal           @db.Decimal(10, 2)
-  moneda                String            @default("MXN") @db.Char(3)
-  fechaInicio           DateTime          @default(now())
-  periodoActualInicio   DateTime          @default(now())
-  fechaCorte            DateTime
-  fechaCancelacion      DateTime?
-  renovAutomatica       Boolean           @default(true)
-  creadoEn              DateTime          @default(now())
-  actualizadoEn         DateTime          @updatedAt
+  id                     String            @id @default(uuid())
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+  usuarioId              String
+  usuario                Usuario           @relation(fields: [usuarioId], references: [id])
+  nivelId                String
+  nivel                  NivelMembresia    @relation(fields: [nivelId], references: [id])
+  estado                 EstadoSuscripcion @default(PENDIENTE_PAGO)
+  precioMensualAplicado  Decimal           @db.Decimal(10, 2)
+  moneda                 String            @default("MXN") @db.Char(3)
+  fechaInicio            DateTime          @default(now())
+  periodoActualInicio    DateTime          @default(now())
+  fechaCorte             DateTime
+  fechaCancelacion       DateTime?
+  renovAutomatica        Boolean           @default(true)
+  creadoEn               DateTime          @default(now())
+  actualizadoEn          DateTime          @updatedAt
 
   pagos             Pago[]
   accesosCredencial AsignacionCredencial[]
 
+  @@unique([usuarioId, idempotencyKey])
   @@index([usuarioId, estado])
   @@index([estado, fechaCorte])
   @@map("suscripciones")
@@ -295,23 +298,26 @@ model Producto {
 }
 
 model OrdenEcommerce {
-  id            String      @id @default(uuid())
-  referencia    String      @unique
-  usuarioId     String
-  usuario       Usuario     @relation(fields: [usuarioId], references: [id])
-  estado        EstadoOrden @default(PENDIENTE)
-  subtotal      Decimal     @db.Decimal(10, 2)
-  descuento     Decimal     @default(0) @db.Decimal(10, 2)
-  impuestos     Decimal     @default(0) @db.Decimal(10, 2)
-  envio         Decimal     @default(0) @db.Decimal(10, 2)
-  total         Decimal     @db.Decimal(10, 2)
-  moneda        String      @default("MXN") @db.Char(3)
-  creadoEn      DateTime    @default(now())
-  actualizadoEn DateTime    @updatedAt
+  id                     String      @id @default(uuid())
+  referencia             String      @unique
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+  usuarioId              String
+  usuario                Usuario     @relation(fields: [usuarioId], references: [id])
+  estado                 EstadoOrden @default(PENDIENTE)
+  subtotal               Decimal     @db.Decimal(10, 2)
+  descuento              Decimal     @default(0) @db.Decimal(10, 2)
+  impuestos              Decimal     @default(0) @db.Decimal(10, 2)
+  envio                  Decimal     @default(0) @db.Decimal(10, 2)
+  total                  Decimal     @db.Decimal(10, 2)
+  moneda                 String      @default("MXN") @db.Char(3)
+  creadoEn               DateTime    @default(now())
+  actualizadoEn          DateTime    @updatedAt
 
   items ItemOrdenEcommerce[]
   pagos Pago[]
 
+  @@unique([usuarioId, idempotencyKey])
   @@index([usuarioId, estado])
   @@index([estado, creadoEn])
   @@map("ordenes_ecommerce")
@@ -333,26 +339,29 @@ model ItemOrdenEcommerce {
 }
 
 model PedidoOnline {
-  id                 String             @id @default(uuid())
-  referencia         String             @unique
-  usuarioId          String
-  usuario            Usuario            @relation(fields: [usuarioId], references: [id])
-  urlProducto        String
-  tienda             String?
-  descripcion        String?
-  montoProducto      Decimal            @db.Decimal(10, 2)
-  porcentajeComision Decimal            @default(15.00) @db.Decimal(5, 2)
-  montoComision      Decimal            @db.Decimal(10, 2)
-  montoEnvio         Decimal            @default(0) @db.Decimal(10, 2)
-  montoTotal         Decimal            @db.Decimal(10, 2)
-  moneda             String             @default("MXN") @db.Char(3)
-  vigenteHasta       DateTime?
-  estado             EstadoPedidoOnline @default(SOLICITADO)
-  creadoEn           DateTime           @default(now())
-  actualizadoEn      DateTime           @updatedAt
+  id                     String             @id @default(uuid())
+  referencia             String             @unique
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+  usuarioId              String
+  usuario                Usuario            @relation(fields: [usuarioId], references: [id])
+  urlProducto            String
+  tienda                 String?
+  descripcion            String?
+  montoProducto          Decimal            @db.Decimal(10, 2)
+  porcentajeComision     Decimal            @default(15.00) @db.Decimal(5, 2)
+  montoComision          Decimal            @db.Decimal(10, 2)
+  montoEnvio             Decimal            @default(0) @db.Decimal(10, 2)
+  montoTotal             Decimal            @db.Decimal(10, 2)
+  moneda                 String             @default("MXN") @db.Char(3)
+  vigenteHasta           DateTime?
+  estado                 EstadoPedidoOnline @default(SOLICITADO)
+  creadoEn               DateTime           @default(now())
+  actualizadoEn          DateTime           @updatedAt
 
   pagos Pago[]
 
+  @@unique([usuarioId, idempotencyKey])
   @@index([usuarioId, estado])
   @@index([estado, creadoEn])
   @@map("pedidos_online")
@@ -374,22 +383,25 @@ model FuncionBot {
 }
 
 model CotizacionBot {
-  id            String              @id @default(uuid())
-  referencia    String              @unique
-  usuarioId     String
-  usuario       Usuario             @relation(fields: [usuarioId], references: [id])
-  descripcion   String?
-  metadata      Json?
-  totalEstimado Decimal             @db.Decimal(10, 2)
-  moneda        String              @default("MXN") @db.Char(3)
-  vigenteHasta  DateTime?
-  estado        EstadoCotizacionBot @default(BORRADOR)
-  creadoEn      DateTime            @default(now())
-  actualizadoEn DateTime            @updatedAt
+  id                     String              @id @default(uuid())
+  referencia             String              @unique
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+  usuarioId              String
+  usuario                Usuario             @relation(fields: [usuarioId], references: [id])
+  descripcion            String?
+  metadata               Json?
+  totalEstimado          Decimal             @db.Decimal(10, 2)
+  moneda                 String              @default("MXN") @db.Char(3)
+  vigenteHasta           DateTime?
+  estado                 EstadoCotizacionBot @default(BORRADOR)
+  creadoEn               DateTime            @default(now())
+  actualizadoEn          DateTime            @updatedAt
 
   funciones    CotizacionBotFuncion[]
   ordenTrabajo OrdenTrabajo?
 
+  @@unique([usuarioId, idempotencyKey])
   @@index([usuarioId, estado])
   @@map("cotizaciones_bot")
 }
@@ -427,29 +439,30 @@ model OrdenTrabajo {
 }
 
 model Pago {
-  id               String          @id @default(uuid())
-  referencia       String          @unique
-  idempotencyKey   String?         @unique
-  usuarioId        String
-  usuario          Usuario         @relation(fields: [usuarioId], references: [id])
-  origen           OrigenPago
-  suscripcionId    String?
-  suscripcion      Suscripcion?    @relation(fields: [suscripcionId], references: [id])
-  ordenEcommerceId String?
-  ordenEcommerce   OrdenEcommerce? @relation(fields: [ordenEcommerceId], references: [id])
-  pedidoOnlineId   String?
-  pedidoOnline     PedidoOnline?   @relation(fields: [pedidoOnlineId], references: [id])
-  ordenTrabajoId   String?
-  ordenTrabajo     OrdenTrabajo?   @relation(fields: [ordenTrabajoId], references: [id])
-  metodo           MetodoPago      @default(TRANSFERENCIA)
-  estado           EstadoPago      @default(PENDIENTE)
-  monto            Decimal         @db.Decimal(10, 2)
-  moneda           String          @default("MXN") @db.Char(3)
-  periodoInicio    DateTime?
-  periodoFin       DateTime?
-  mpPaymentId      String?         @unique
-  mpPreferenceId   String?
-  mpStatusDetail   String?
+  id                      String          @id @default(uuid())
+  referencia              String          @unique
+  idempotencyKey          String?
+  idempotencyFingerprint  String?
+  usuarioId               String
+  usuario                 Usuario         @relation(fields: [usuarioId], references: [id])
+  origen                  OrigenPago
+  suscripcionId           String?
+  suscripcion             Suscripcion?    @relation(fields: [suscripcionId], references: [id])
+  ordenEcommerceId        String?
+  ordenEcommerce          OrdenEcommerce? @relation(fields: [ordenEcommerceId], references: [id])
+  pedidoOnlineId          String?
+  pedidoOnline            PedidoOnline?   @relation(fields: [pedidoOnlineId], references: [id])
+  ordenTrabajoId          String?
+  ordenTrabajo            OrdenTrabajo?   @relation(fields: [ordenTrabajoId], references: [id])
+  metodo                  MetodoPago      @default(TRANSFERENCIA)
+  estado                  EstadoPago      @default(PENDIENTE)
+  monto                   Decimal         @db.Decimal(10, 2)
+  moneda                  String          @default("MXN") @db.Char(3)
+  periodoInicio           DateTime?
+  periodoFin              DateTime?
+  mpPaymentId             String?         @unique
+  mpPreferenceId          String?
+  mpStatusDetail          String?
   referenciaTransferencia String?
   nombreOrdenante         String?
   comprobanteUrl          String?
@@ -457,9 +470,10 @@ model Pago {
   validadoPorId           String?
   validadoEn              DateTime?
   notaValidacion          String?
-  creadoEn         DateTime        @default(now())
-  actualizadoEn    DateTime        @updatedAt
+  creadoEn                DateTime        @default(now())
+  actualizadoEn           DateTime        @updatedAt
 
+  @@unique([usuarioId, idempotencyKey])
   @@index([usuarioId, estado])
   @@index([suscripcionId])
   @@index([ordenEcommerceId])

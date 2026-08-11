@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { RolUsuario } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedUser } from './types/authenticated-user.type';
 
 interface JwtPayload {
@@ -14,7 +15,7 @@ interface JwtPayload {
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(configService: ConfigService) {
+  constructor(configService: ConfigService, private readonly prisma: PrismaService) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
@@ -22,7 +23,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: JwtPayload): AuthenticatedUser {
-    return { userId: payload.sub, email: payload.email, role: payload.role, sessionId: payload.sid };
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    const session = await this.prisma.sesion.findFirst({
+      where: {
+        id: payload.sid,
+        usuarioId: payload.sub,
+        revocadoEn: null,
+        expiraEn: { gt: new Date() },
+        usuario: { activo: true },
+      },
+      include: { usuario: true },
+    });
+    if (!session) throw new UnauthorizedException('Sesión inválida o vencida.');
+    return {
+      userId: session.usuario.id,
+      email: session.usuario.email,
+      role: session.usuario.rol,
+      sessionId: session.id,
+    };
   }
 }

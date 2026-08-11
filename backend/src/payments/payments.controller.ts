@@ -1,7 +1,8 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { parseIdempotencyKey } from '../common/idempotency';
 import { CreateTransferPaymentDto } from './dto/create-transfer-payment.dto';
 import { ReviewTransferDto } from './dto/review-transfer.dto';
 import { SubmitTransferReceiptDto } from './dto/submit-transfer-receipt.dto';
@@ -18,8 +19,12 @@ export class PaymentsController {
   @Post('transfer')
   @ApiOperation({ summary: 'Genera una referencia e instrucciones para pago por transferencia' })
   @ApiCreatedResponse({ type: TransferPaymentDto })
-  createTransfer(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateTransferPaymentDto): Promise<TransferPaymentDto> {
-    return this.paymentsService.createTransferPayment(user.userId, dto);
+  createTransfer(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateTransferPaymentDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<TransferPaymentDto> {
+    return this.paymentsService.createTransferPayment(user.userId, dto, parseIdempotencyKey(idempotencyKey));
   }
 
   @Get('review-queue')

@@ -4,7 +4,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateOnlineOrderDto {
   @ApiProperty({ example: 'https://www.ejemplo.com/producto' })
-  @IsUrl({ require_tld: false })
+  @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
   urlProducto!: string;
 
   @ApiPropertyOptional({ example: 'Amazon' })
@@ -23,13 +23,6 @@ export class CreateOnlineOrderDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
+  @Max(86_956_521.73)
   montoProducto!: number;
-
-  @ApiPropertyOptional({ example: 15, default: 15 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Min(0.01)
-  @Max(100)
-  porcentajeComision?: number;
 }

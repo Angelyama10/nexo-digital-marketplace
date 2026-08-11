@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   Bot,
@@ -35,22 +35,44 @@ type Product = { id: string; name: string; description: string | null; price: nu
 type BotFunction = { id: string; name: string; description: string | null; basePrice: number };
 type TransferPayment = { paymentId: string; reference: string; amount: number; currency: string; status: string; instructions: { bank: string; accountHolder: string; accountNumber?: string; clabe?: string; concept: string; additionalInstructions?: string } };
 type AuthMode = 'login' | 'register';
+type LoadState = 'loading' | 'ready' | 'error';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const ACCESS_TOKEN_KEY = 'nexo_access_token';
+let accessToken: string | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+
+function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const session = await response.json() as { accessToken: string };
+        setAccessToken(session.accessToken);
+        return session.accessToken;
+      })
+      .catch(() => null)
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
 
 async function api<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
-  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: 'include',
-    headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init.headers },
+    headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...init.headers },
   });
   if (response.status === 401 && retry && path !== '/auth/refresh') {
-    const refreshed = await fetch(`${API_URL}/auth/refresh`, { method: 'POST', credentials: 'include' });
-    if (refreshed.ok) {
-      const session = await refreshed.json() as { accessToken: string };
-      localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken);
+    const refreshedToken = await refreshAccessToken();
+    if (refreshedToken) {
       return api<T>(path, init, false);
     }
   }
@@ -93,6 +115,9 @@ function App() {
   const [levels, setLevels] = useState<MembershipLevel[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [botFunctions, setBotFunctions] = useState<BotFunction[]>([]);
+  const [levelsState, setLevelsState] = useState<LoadState>('loading');
+  const [productsState, setProductsState] = useState<LoadState>('loading');
+  const [botFunctionsState, setBotFunctionsState] = useState<LoadState>('loading');
   const [activeCategory, setActiveCategory] = useState<ServiceCategory | 'all'>('all');
   const [menuOpen, setMenuOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -101,36 +126,73 @@ function App() {
   const [selectedBotFunctions, setSelectedBotFunctions] = useState<string[]>([]);
   const [transferPayment, setTransferPayment] = useState<TransferPayment | null>(null);
   const [activeGuide, setActiveGuide] = useState<ServiceGuideKey | null>(null);
+  const pendingActions = useRef(new Set<string>());
+  const operationKeys = useRef(new Map<string, string>());
 
   useEffect(() => {
+    // Migración defensiva desde versiones anteriores que guardaban el JWT en
+    // localStorage. La sesión vigente se restaura con la cookie HttpOnly.
+    localStorage.removeItem('nexo_access_token');
     api<ServiceItem[]>('/services').then((catalog) => {
       const missingServices = fallbackServices.filter((fallback) => !catalog.some((service) => service.id === fallback.id));
       setServices([...catalog, ...missingServices]);
     }).catch(() => undefined);
-    api<MembershipLevel[]>('/membership-levels').then(setLevels).catch(() => undefined);
-    api<Product[]>('/products').then(setProducts).catch(() => undefined);
-    api<BotFunction[]>('/bot-functions').then(setBotFunctions).catch(() => undefined);
-    if (localStorage.getItem(ACCESS_TOKEN_KEY)) api<User>('/auth/me').then(setUser).catch(() => localStorage.removeItem(ACCESS_TOKEN_KEY));
+    api<MembershipLevel[]>('/membership-levels')
+      .then((catalog) => { setLevels(catalog); setLevelsState('ready'); })
+      .catch(() => setLevelsState('error'));
+    api<Product[]>('/products')
+      .then((catalog) => { setProducts(catalog); setProductsState('ready'); })
+      .catch(() => setProductsState('error'));
+    api<BotFunction[]>('/bot-functions')
+      .then((catalog) => { setBotFunctions(catalog); setBotFunctionsState('ready'); })
+      .catch(() => setBotFunctionsState('error'));
+    refreshAccessToken().then((token) => token ? api<User>('/auth/me').then(setUser) : undefined).catch(() => setAccessToken(null));
   }, []);
 
   const requireAccount = (action: () => void) => user ? action() : setAuthMode('login');
-  const requestTransfer = async (resourceType: string, resourceId: string) => {
+  const keyForOperation = (operation: string) => {
+    const existing = operationKeys.current.get(operation);
+    if (existing) return existing;
+    const created = newIdempotencyKey();
+    operationKeys.current.set(operation, created);
+    return created;
+  };
+  const runOnce = async (operation: string, action: () => Promise<void>) => {
+    if (pendingActions.current.has(operation)) return;
+    pendingActions.current.add(operation);
+    try { await action(); } finally { pendingActions.current.delete(operation); }
+  };
+  const requestTransfer = async (resourceType: string, resourceId: string): Promise<boolean> => {
+    const operation = `payment:${resourceType}:${resourceId}`;
     try {
-      const result = await api<TransferPayment>('/payments/transfer', { method: 'POST', body: JSON.stringify({ resourceType, resourceId }) });
+      const result = await api<TransferPayment>('/payments/transfer', { method: 'POST', headers: { 'Idempotency-Key': keyForOperation(operation) }, body: JSON.stringify({ resourceType, resourceId }) });
       setTransferPayment(result);
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible preparar la transferencia.'); }
+      operationKeys.current.delete(operation);
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'No fue posible preparar la transferencia.');
+      return false;
+    }
   };
   const subscribe = (levelId: string) => requireAccount(() => {
-    api<{ id: string }>('/subscriptions', { method: 'POST', body: JSON.stringify({ levelId }) })
-      .then((subscription) => requestTransfer('SUBSCRIPTION', subscription.id))
-      .catch((error: Error) => setNotice(error.message));
+    const operation = `subscription:${levelId}`;
+    void runOnce(operation, async () => {
+      try {
+        const subscription = await api<{ id: string }>('/subscriptions', { method: 'POST', headers: { 'Idempotency-Key': keyForOperation(operation) }, body: JSON.stringify({ levelId }) });
+        if (await requestTransfer('SUBSCRIPTION', subscription.id)) operationKeys.current.delete(operation);
+      } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible crear la suscripción.'); }
+    });
   });
   const buyProduct = (productId: string) => requireAccount(() => {
-    api<{ id: string }>('/ecommerce-orders', { method: 'POST', body: JSON.stringify({ items: [{ productId, quantity: 1 }] }) })
-      .then((order) => requestTransfer('ECOMMERCE_ORDER', order.id))
-      .catch((error: Error) => setNotice(error.message));
+    const operation = `ecommerce:${productId}`;
+    void runOnce(operation, async () => {
+      try {
+        const order = await api<{ id: string }>('/ecommerce-orders', { method: 'POST', headers: { 'Idempotency-Key': keyForOperation(operation) }, body: JSON.stringify({ items: [{ productId, quantity: 1 }] }) });
+        if (await requestTransfer('ECOMMERCE_ORDER', order.id)) operationKeys.current.delete(operation);
+      } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible crear la orden.'); }
+    });
   });
-  const logout = async () => { await api<void>('/auth/logout', { method: 'POST' }).catch(() => undefined); localStorage.removeItem(ACCESS_TOKEN_KEY); setUser(null); };
+  const logout = async () => { await api<void>('/auth/logout', { method: 'POST' }).catch(() => undefined); setAccessToken(null); setUser(null); };
 
   const visibleServices = activeCategory === 'all'
     ? services
@@ -143,16 +205,19 @@ function App() {
           <span className="brand-mark">N</span>
           <span>Nexo<span className="brand-dot">.</span></span>
         </a>
-        <div className={`nav-links ${menuOpen ? 'is-open' : ''}`}>
+        <div className={`nav-links ${menuOpen ? 'is-open' : ''}`} id="main-navigation">
           <a href="#servicios" onClick={() => setMenuOpen(false)}>Servicios</a>
           <a href="#membresia" onClick={() => setMenuOpen(false)}>Membresías</a>
           <a href="#como-funciona" onClick={() => setMenuOpen(false)}>Cómo funciona</a>
           <a href="#ayuda" onClick={() => setMenuOpen(false)}>Ayuda</a>
+          {user
+            ? <button className="mobile-auth-link" type="button" onClick={() => { setMenuOpen(false); void logout(); }}>Salir de la cuenta de {user.name}</button>
+            : <button className="mobile-auth-link" type="button" onClick={() => { setMenuOpen(false); setAuthMode('login'); }}>Iniciar sesión</button>}
         </div>
         <div className="nav-actions">
           {user ? <><span className="account-name">Hola, {user.name}</span><button className="login-button" onClick={logout}>Salir</button></> : <button className="login-button" onClick={() => setAuthMode('login')}>Iniciar sesión</button>}
           <a className="nav-cta" href="#servicios">Explorar <ArrowUpRight size={16} /></a>
-          <button className="menu-button" onClick={() => setMenuOpen((open) => !open)} aria-label="Abrir menú">
+          <button className="menu-button" onClick={() => setMenuOpen((open) => !open)} aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="main-navigation">
             {menuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
@@ -214,33 +279,40 @@ function App() {
         <div className="checkout-grid">
           <article className="checkout-panel">
             <div className="panel-heading"><div><h3>Membresías</h3><p>Tu suscripción se activa al confirmarse el pago.</p></div><button className="detail-button" type="button" onClick={() => setActiveGuide('memberships')}>Cómo funcionan</button></div>
-            {levels.length ? levels.map((level) => <div className="purchase-row" key={level.id}><div className="purchase-copy"><strong>{level.name}</strong><small>{level.description}</small></div><button onClick={() => subscribe(level.id)}>${level.monthlyPrice} / mes</button></div>) : <small>Cargando planes…</small>}
+            {levelsState === 'loading' && <small className="catalog-message">Cargando planes…</small>}
+            {levelsState === 'error' && <small className="catalog-message catalog-error">No pudimos cargar las membresías. Intenta de nuevo en unos minutos.</small>}
+            {levelsState === 'ready' && !levels.length && <small className="catalog-message">No hay membresías disponibles por ahora.</small>}
+            {levelsState === 'ready' && levels.map((level) => <div className="purchase-row" key={level.id}><div className="purchase-copy"><strong>{level.name}</strong><small>{level.description}</small></div><button onClick={() => subscribe(level.id)}>${level.monthlyPrice} / mes</button></div>)}
           </article>
           <article className="checkout-panel">
             <div className="panel-heading"><div><h3>Licencias y servicios</h3><p>Office, VPN, dominios y servidores con pago por transferencia.</p></div><button className="detail-button" type="button" onClick={() => setActiveGuide('office')}>Guía de licencias</button></div>
-            {products.length ? products.map((product) => <div className="purchase-row" key={product.id}><div className="purchase-copy"><strong>{product.name}</strong><small>{product.description}</small><button className="product-detail-link" type="button" onClick={() => setActiveGuide(guideForProduct(product.type))}>Ver modalidad y condiciones</button></div><button onClick={() => buyProduct(product.id)}>Transferir ${product.price}</button></div>) : <small>Cargando productos…</small>}
+            {productsState === 'loading' && <small className="catalog-message">Cargando productos…</small>}
+            {productsState === 'error' && <small className="catalog-message catalog-error">No pudimos cargar las licencias y servicios. Intenta de nuevo en unos minutos.</small>}
+            {productsState === 'ready' && !products.length && <small className="catalog-message">No hay licencias o servicios disponibles por ahora.</small>}
+            {productsState === 'ready' && products.map((product) => <div className="purchase-row" key={product.id}><div className="purchase-copy"><strong>{product.name}</strong><small>{product.description}</small><button className="product-detail-link" type="button" onClick={() => setActiveGuide(guideForProduct(product.type))}>Ver modalidad y condiciones</button></div><button onClick={() => buyProduct(product.id)}>Transferir ${product.price}</button></div>)}
           </article>
         </div>
       </section>
 
       <section className="request-section shell" id="solicitudes">
-        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes de solicitar la transferencia.</p><button className="detail-button request-detail" type="button" onClick={() => setActiveGuide('telegram-bots')}>Qué incluye y cómo se entrega</button><div className="function-list">{botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); api<{ id: string }>('/bot-quotes', { method: 'POST', body: JSON.stringify({ funcionIds: selectedBotFunctions }) }).then((quote) => requestTransfer('BOT_QUOTE', quote.id)).catch((error: Error) => setNotice(error.message)); })}>Cotizar y transferir <ArrowUpRight size={17} /></button></article>
+        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes de solicitar la transferencia.</p><button className="detail-button request-detail" type="button" onClick={() => setActiveGuide('telegram-bots')}>Qué incluye y cómo se entrega</button><div className="function-list">{botFunctionsState === 'loading' && <small className="catalog-message">Cargando funciones…</small>}{botFunctionsState === 'error' && <small className="catalog-message catalog-error">No pudimos cargar las funciones del bot.</small>}{botFunctionsState === 'ready' && !botFunctions.length && <small className="catalog-message">No hay funciones configuradas por ahora.</small>}{botFunctionsState === 'ready' && botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" disabled={botFunctionsState !== 'ready' || !botFunctions.length} onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); const selected = [...selectedBotFunctions].sort(); const operation = `bot:${selected.join(',')}`; void runOnce(operation, async () => { try { const quote = await api<{ id: string }>('/bot-quotes', { method: 'POST', headers: { 'Idempotency-Key': keyForOperation(operation) }, body: JSON.stringify({ funcionIds: selected }) }); if (await requestTransfer('BOT_QUOTE', quote.id)) operationKeys.current.delete(operation); } catch (error) { setNotice(error instanceof Error ? error.message : 'No fue posible crear la cotización.'); } }); })}>Cotizar y transferir <ArrowUpRight size={17} /></button></article>
         <OnlineOrderForm requireAccount={requireAccount} requestTransfer={requestTransfer} setNotice={setNotice} openGuide={() => setActiveGuide('online-orders')} />
       </section>
 
       <footer className="site-footer shell" id="ayuda"><div><a className="brand" href="#top"><span className="brand-mark">N</span><span>Nexo<span className="brand-dot">.</span></span></a><p>Servicios digitales para la vida real.</p></div><div className="footer-links"><a href="#servicios">Servicios</a><a href="#membresia">Membresías</a><a href="#solicitudes">Solicitudes</a><a href="mailto:hola@nexo.local">Contacto</a></div><span className="footer-year">© 2026 Nexo</span></footer>
       {notice && <div className="notice" role="status">{notice}<button aria-label="Cerrar" onClick={() => setNotice(null)}><X size={16} /></button></div>}
-      {authMode && <AuthDialog mode={authMode} close={() => setAuthMode(null)} onSession={(session) => { localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken); setUser(session.user); setAuthMode(null); setNotice(`Bienvenida, ${session.user.name}. Tu cuenta está lista.`); }} />}
+      {authMode && <AuthDialog mode={authMode} close={() => setAuthMode(null)} onSession={(session) => { setAccessToken(session.accessToken); setUser(session.user); setAuthMode(null); setNotice(`Bienvenida, ${session.user.name}. Tu cuenta está lista.`); }} />}
       {transferPayment && <TransferDialog payment={transferPayment} close={() => setTransferPayment(null)} onSubmitted={(message) => { setTransferPayment(null); setNotice(message); }} />}
       {activeGuide && <ServiceGuideDialog guideKey={activeGuide} close={() => setActiveGuide(null)} />}
     </main>
   );
 }
 
-function OnlineOrderForm({ requireAccount, requestTransfer, setNotice, openGuide }: { requireAccount: (action: () => void) => void; requestTransfer: (type: string, id: string) => Promise<void>; setNotice: (notice: string) => void; openGuide: () => void }) {
+function OnlineOrderForm({ requireAccount, requestTransfer, setNotice, openGuide }: { requireAccount: (action: () => void) => void; requestTransfer: (type: string, id: string) => Promise<boolean>; setNotice: (notice: string) => void; openGuide: () => void }) {
   const [url, setUrl] = useState(''); const [amount, setAmount] = useState('');
-  const submit = (event: FormEvent) => { event.preventDefault(); requireAccount(() => { api<{ id: string; totalAmount: number }>('/online-orders', { method: 'POST', body: JSON.stringify({ urlProducto: url, montoProducto: Number(amount) }) }).then((order) => requestTransfer('ONLINE_ORDER', order.id)).catch((error: Error) => setNotice(error.message)); }); };
-  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y validamos la transferencia antes de procesar tu pedido.</p><button className="detail-button request-detail" type="button" onClick={openGuide}>Ver cálculo, alcance y condiciones</button><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit">Calcular transferencia <ArrowUpRight size={17} /></button></form></article>;
+  const [submitting, setSubmitting] = useState(false); const operationKeys = useRef(new Map<string, string>());
+  const submit = (event: FormEvent) => { event.preventDefault(); requireAccount(() => { if (submitting) return; const operation = `${url.trim()}|${amount}`; const idempotencyKey = operationKeys.current.get(operation) ?? newIdempotencyKey(); operationKeys.current.set(operation, idempotencyKey); setSubmitting(true); api<{ id: string; totalAmount: number }>('/online-orders', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify({ urlProducto: url, montoProducto: Number(amount) }) }).then(async (order) => { if (await requestTransfer('ONLINE_ORDER', order.id)) operationKeys.current.delete(operation); }).catch((error: Error) => setNotice(error.message)).finally(() => setSubmitting(false)); }); };
+  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y validamos la transferencia antes de procesar tu pedido.</p><button className="detail-button request-detail" type="button" onClick={openGuide}>Ver cálculo, alcance y condiciones</button><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit" disabled={submitting}>{submitting ? 'Preparando…' : 'Calcular transferencia'} <ArrowUpRight size={17} /></button></form></article>;
 }
 
 function TransferDialog({ payment, close, onSubmitted }: { payment: TransferPayment; close: () => void; onSubmitted: (message: string) => void }) {
@@ -252,7 +324,7 @@ function TransferDialog({ payment, close, onSubmitted }: { payment: TransferPaym
 function AuthDialog({ mode, close, onSession }: { mode: AuthMode; close: () => void; onSession: (session: { accessToken: string; user: User }) => void }) {
   const [currentMode, setCurrentMode] = useState(mode); const [name, setName] = useState(''); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
   const submit = async (event: FormEvent) => { event.preventDefault(); setLoading(true); setError(''); try { const body = currentMode === 'register' ? { nombre: name, email, password } : { email, password }; onSession(await api<{ accessToken: string; user: User }>(`/auth/${currentMode}`, { method: 'POST', body: JSON.stringify(body) })); } catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'No fue posible acceder.'); } finally { setLoading(false); } };
-  return <div className="modal-backdrop" role="presentation"><section className="auth-dialog" role="dialog" aria-modal="true" aria-label="Acceso a Nexo"><button className="modal-close" onClick={close} aria-label="Cerrar"><X size={18} /></button><span className="section-kicker">Tu espacio Nexo</span><h2>{currentMode === 'login' ? 'Qué bueno verte.' : 'Crea tu cuenta.'}</h2><form onSubmit={submit}>{currentMode === 'register' && <label>Nombre<input required value={name} onChange={(event) => setName(event.target.value)} /></label>}<label>Correo<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Contraseña<input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loading} type="submit">{loading ? 'Un momento…' : currentMode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'} <ArrowUpRight size={17} /></button></form><button className="switch-auth" onClick={() => setCurrentMode(currentMode === 'login' ? 'register' : 'login')}>{currentMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}</button></section></div>;
+  return <div className="modal-backdrop" role="presentation"><section className="auth-dialog" role="dialog" aria-modal="true" aria-label="Acceso a Nexo"><button className="modal-close" onClick={close} aria-label="Cerrar"><X size={18} /></button><span className="section-kicker">Tu espacio Nexo</span><h2>{currentMode === 'login' ? 'Qué bueno verte.' : 'Crea tu cuenta.'}</h2><form onSubmit={submit}>{currentMode === 'register' && <label>Nombre<input required minLength={2} maxLength={80} autoComplete="given-name" value={name} onChange={(event) => setName(event.target.value)} /></label>}<label>Correo<input required maxLength={254} type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Contraseña<input required minLength={currentMode === 'register' ? 10 : 1} maxLength={128} type="password" autoComplete={currentMode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loading} type="submit">{loading ? 'Un momento…' : currentMode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'} <ArrowUpRight size={17} /></button></form><button className="switch-auth" onClick={() => setCurrentMode(currentMode === 'login' ? 'register' : 'login')}>{currentMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}</button></section></div>;
 }
 
 function ServiceCard({ service, index, onLearn }: { service: ServiceItem; index: number; onLearn: () => void }) {

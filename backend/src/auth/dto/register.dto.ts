@@ -4,19 +4,21 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Ana' })
+  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
   @IsString()
   @MinLength(2)
   @MaxLength(80)
   nombre!: string;
 
   @ApiPropertyOptional({ example: 'López' })
+  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
   @IsOptional()
   @IsString()
   @MaxLength(80)
   apellido?: string;
 
   @ApiProperty({ example: 'ana@ejemplo.com' })
-  @Transform(({ value }: { value: string }) => value.trim().toLowerCase())
+  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim().toLowerCase() : value)
   @IsEmail()
   @MaxLength(254)
   email!: string;

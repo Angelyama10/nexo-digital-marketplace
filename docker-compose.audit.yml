@@ -1,0 +1,154 @@
+x-audit-backend-build: &audit-backend-build
+  context: ./backend
+  dockerfile: Dockerfile
+  target: builder
+
+x-audit-environment: &audit-environment
+  NODE_ENV: test
+  DATABASE_URL: postgresql://nexo_audit:nexo_audit_password@audit-postgres:5432/nexo_audit
+  REDIS_URL: redis://audit-redis:6379
+  FRONTEND_URL: http://audit-frontend
+  JWT_ACCESS_SECRET: audit-access-secret-change-only-inside-tests
+  JWT_REFRESH_SECRET: audit-refresh-secret-change-only-inside-tests
+  JWT_ACCESS_TTL: 15m
+  JWT_REFRESH_TTL: 7d
+  COOKIE_SECURE: "false"
+  TRANSFER_BANK_NAME: Banco QA
+  TRANSFER_ACCOUNT_HOLDER: Nexo QA
+  TRANSFER_CLABE: "000000000000000000"
+
+services:
+  audit-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: nexo_audit
+      POSTGRES_PASSWORD: nexo_audit_password
+      POSTGRES_DB: nexo_audit
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexo_audit -d nexo_audit"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  audit-redis:
+    image: redis:7.4.9-alpine
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  audit-migrate:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    build: *audit-backend-build
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment: *audit-environment
+    depends_on:
+      audit-postgres:
+        condition: service_healthy
+
+  audit-unit:
+    image: nexo-backend-audit:local
+    pull_policy: build
+    build: *audit-backend-build
+    command: ["npx", "jest", "--config", "jest.audit-unit.config.js", "--runInBand"]
+    environment: *audit-environment
+
+  audit-integration:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    build: *audit-backend-build
+    command: ["npx", "jest", "--config", "jest.integration.config.js", "--runInBand"]
+    environment: *audit-environment
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      audit-redis:
+        condition: service_healthy
+
+  audit-e2e:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    build: *audit-backend-build
+    command: ["npx", "jest", "--config", "jest.e2e.config.js", "--runInBand"]
+    environment: *audit-environment
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      audit-redis:
+        condition: service_healthy
+
+  audit-security:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    build: *audit-backend-build
+    command: ["npx", "jest", "--config", "jest.security.config.js", "--runInBand"]
+    environment: *audit-environment
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      audit-redis:
+        condition: service_healthy
+
+  audit-app:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    build: *audit-backend-build
+    command: ["node", "dist/main.js"]
+    environment:
+      <<: *audit-environment
+      FRONTEND_URL: http://127.0.0.1:4173
+    ports:
+      - "127.0.0.1:${AUDIT_APP_PORT:-3002}:3000"
+    depends_on:
+      audit-migrate:
+        condition: service_completed_successfully
+      audit-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  audit-load:
+    image: nexo-backend-audit:local
+    pull_policy: never
+    command: ["npx", "tsx", "test/load/load-test.ts"]
+    environment:
+      LOAD_TARGET: http://audit-app:3000
+      LOAD_PROFILE: ${LOAD_PROFILE:-smoke}
+      LOAD_PATHS: ${LOAD_PATHS:-/api/products}
+      LOAD_TIMEOUT_MS: ${LOAD_TIMEOUT_MS:-3000}
+    depends_on:
+      audit-app:
+        condition: service_healthy
+
+  audit-frontend:
+    image: nexo-frontend-audit:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    command: ["npm", "run", "dev:frontend"]
+    environment:
+      VITE_API_URL: http://127.0.0.1:3002/api
+    ports:
+      - "127.0.0.1:4173:5173"
+    depends_on:
+      audit-app:
+        condition: service_healthy
+
+  audit-frontend-build:
+    image: nexo-frontend-audit-build:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: builder
+      args:
+        VITE_API_URL: /api

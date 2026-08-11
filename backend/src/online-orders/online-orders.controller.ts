@@ -1,10 +1,11 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CreateOnlineOrderDto } from './dto/create-online-order.dto';
 import { OnlineOrderDto } from './dto/online-order.dto';
 import { OnlineOrdersService } from './online-orders.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.type';
+import { parseIdempotencyKey } from '../common/idempotency';
 
 @ApiTags('online-orders')
 @Controller('online-orders')
@@ -15,7 +16,11 @@ export class OnlineOrdersController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Solicita un pedido online y calcula la comisión automáticamente' })
   @ApiCreatedResponse({ type: OnlineOrderDto })
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateOnlineOrderDto): Promise<OnlineOrderDto> {
-    return this.onlineOrdersService.create(user.userId, dto);
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateOnlineOrderDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<OnlineOrderDto> {
+    return this.onlineOrdersService.create(user.userId, dto, parseIdempotencyKey(idempotencyKey));
   }
 }
