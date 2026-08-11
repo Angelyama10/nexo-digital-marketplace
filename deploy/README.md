@@ -1,6 +1,6 @@
 # Despliegue de Nexo en VPS
 
-Este proyecto se despliega con Docker Compose. La web expone el puerto `80`; PostgreSQL, Redis y NestJS permanecen en la red interna de Docker. Nginx enruta `/api` hacia el backend, por lo que no se expone el puerto 3000 al público.
+Este proyecto se despliega con Docker Compose. Caddy expone los puertos `80` y `443`, obtiene y renueva HTTPS automáticamente, y envía tráfico al frontend. PostgreSQL, Redis y NestJS permanecen en la red interna de Docker; Nginx enruta `/api` hacia el backend, por lo que no se expone el puerto 3000 al público.
 
 ## Preparación
 
@@ -13,9 +13,9 @@ cp deploy/production.env.example .env
 nano .env
 ```
 
-Completa las contraseñas, secretos JWT y los cinco valores `TRANSFER_*`. La aplicación bloquea una solicitud de pago si faltan banco, beneficiario y cuenta o CLABE.
+Completa `DOMAIN`, `WWW_DOMAIN`, contraseñas, secretos JWT y los cinco valores `TRANSFER_*`. La aplicación bloquea una solicitud de pago si faltan banco, beneficiario y cuenta o CLABE. Ambos dominios deben resolver al VPS antes de iniciar Caddy.
 
-Para una prueba temporal por IP sin HTTPS, configura `FRONTEND_URL` con esa URL HTTP y `COOKIE_SECURE=false`. Para producción real, configura un dominio con HTTPS antes de recibir clientes.
+No uses la IP como URL de producción: Caddy requiere los dominios públicos para emitir el certificado. Mantén `COOKIE_SECURE=true`.
 
 ## Inicio y verificación
 
@@ -25,7 +25,7 @@ docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs -f backend frontend
 ```
 
-El servicio `migrate` aplica las migraciones Prisma y `seed` carga o actualiza el catálogo (incluye licencias Office) antes de iniciar la API. Comprueba `http://TU_SERVIDOR/api/health` y abre la web en `http://TU_SERVIDOR`.
+El servicio `migrate` aplica las migraciones Prisma y `seed` carga o actualiza el catálogo (incluye licencias Office) antes de iniciar la API. Comprueba `https://TU_DOMINIO/api/health` y abre la web en `https://TU_DOMINIO`.
 
 ## Operación de transferencias
 

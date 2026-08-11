@@ -142,7 +142,9 @@ docker compose exec backend npx prisma migrate deploy
 No subas archivos `.env` al repositorio. En el VPS crea un `.env` a partir de [`.env.example`](/Users/angelyama/Documents/Proyecto%20Ecommer/.env.example) y define, como mínimo:
 
 ```env
-FRONTEND_URL=https://tu-dominio.com
+DOMAIN=ali-nexo.com
+WWW_DOMAIN=www.ali-nexo.com
+FRONTEND_URL=https://ali-nexo.com
 JWT_ACCESS_SECRET=un_valor_largo_y_aleatorio
 JWT_REFRESH_SECRET=otro_valor_largo_y_aleatorio
 COOKIE_SECURE=true
@@ -153,7 +155,7 @@ TRANSFER_CLABE=
 TRANSFER_INSTRUCTIONS=
 ```
 
-Stripe fue eliminado. Los servicios solo se activan después de que un administrador valide una transferencia y su comprobante. La guía completa de despliegue, alta de administrador, actualización y reversión está en [deploy/README.md](/Users/angelyama/Documents/Proyecto%20Ecommer/deploy/README.md).
+Stripe fue eliminado. Los servicios solo se activan después de que un administrador valide una transferencia y su comprobante. Producción usa Caddy para HTTPS automático de `DOMAIN` y `WWW_DOMAIN`; ambos nombres deben resolver al VPS y los puertos 80/443 deben estar abiertos. La guía completa de despliegue, alta de administrador, actualización y reversión está en [deploy/README.md](/Users/angelyama/Documents/Proyecto%20Ecommer/deploy/README.md).
 
 ## 8. Validación realizada
 
