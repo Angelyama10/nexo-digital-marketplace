@@ -29,6 +29,7 @@ services:
 
   migrate:
     image: nexo-backend-migrate:local
+    pull_policy: build
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -42,6 +43,7 @@ services:
 
   seed:
     image: nexo-backend-migrate:local
+    pull_policy: never
     command: ["npm", "run", "prisma:seed"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER es obligatorio}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatorio}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB es obligatorio}
@@ -51,6 +53,7 @@ services:
 
   backend:
     image: nexo-backend:local
+    pull_policy: build
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -90,6 +93,7 @@ services:
 
   frontend:
     image: nexo-frontend:local
+    pull_policy: build
     build:
       context: ./frontend
       dockerfile: Dockerfile
