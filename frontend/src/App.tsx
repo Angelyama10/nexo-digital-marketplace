@@ -13,6 +13,8 @@ import {
   Wifi,
   X,
 } from 'lucide-react';
+import { ServiceGuideDialog } from './ServiceGuideDialog';
+import { guideForProduct, guideForService, type ServiceGuideKey } from './service-guides';
 
 type ServiceCategory = 'streaming' | 'ai' | 'education' | 'infrastructure' | 'automation' | 'commerce';
 
@@ -98,9 +100,13 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedBotFunctions, setSelectedBotFunctions] = useState<string[]>([]);
   const [transferPayment, setTransferPayment] = useState<TransferPayment | null>(null);
+  const [activeGuide, setActiveGuide] = useState<ServiceGuideKey | null>(null);
 
   useEffect(() => {
-    api<ServiceItem[]>('/services').then(setServices).catch(() => undefined);
+    api<ServiceItem[]>('/services').then((catalog) => {
+      const missingServices = fallbackServices.filter((fallback) => !catalog.some((service) => service.id === fallback.id));
+      setServices([...catalog, ...missingServices]);
+    }).catch(() => undefined);
     api<MembershipLevel[]>('/membership-levels').then(setLevels).catch(() => undefined);
     api<Product[]>('/products').then(setProducts).catch(() => undefined);
     api<BotFunction[]>('/bot-functions').then(setBotFunctions).catch(() => undefined);
@@ -192,42 +198,49 @@ function App() {
       </section>
 
       <section className="services-section shell" id="servicios">
-        <div className="section-heading"><div><span className="section-kicker">La selección Nexo</span><h2>Servicios que sí <em>aportan.</em></h2></div><a href="#servicios" className="view-all">Ver todo <ChevronRight size={17} /></a></div>
+        <div className="section-heading"><div><span className="section-kicker">La selección Nexo</span><h2>Servicios que sí <em>aportan.</em></h2></div><button type="button" className="view-all" onClick={() => setActiveCategory('all')}>Ver todo <ChevronRight size={17} /></button></div>
         <div className="service-grid">
-          {visibleServices.map((service, index) => <ServiceCard key={service.id} service={service} index={index} />)}
+          {visibleServices.map((service, index) => <ServiceCard key={service.id} service={service} index={index} onLearn={() => setActiveGuide(guideForService(service.id, service.category))} />)}
         </div>
       </section>
 
       <section className="membership-section shell" id="membresia">
-        <div className="membership-content"><span className="section-kicker light">Nexo Club</span><h2>Más usas Nexo,<br /><em>más ganas.</em></h2><p>Una membresía que te da precios preferentes, soporte prioritario y beneficios que se sienten desde el primer mes.</p><a className="light-button" href="#ayuda">Conocer membresías <ArrowUpRight size={17} /></a></div>
+        <div className="membership-content"><span className="section-kicker light">Nexo Club</span><h2>Más usas Nexo,<br /><em>más ganas.</em></h2><p>Una membresía que te da precios preferentes, soporte prioritario y beneficios que se sienten desde el primer mes.</p><button className="light-button" type="button" onClick={() => setActiveGuide('memberships')}>Conocer membresías <ArrowUpRight size={17} /></button></div>
         <div className="membership-orbit"><div className="orbit-label label-top">precio justo</div><div className="orbit-label label-bottom">soporte humano</div><div className="membership-core"><span>N</span><small>CLUB</small></div><div className="membership-ring ring-a" /><div className="membership-ring ring-b" /></div>
       </section>
 
-      <section className="commerce-section shell" aria-label="Compra y cotiza">
+      <section className="commerce-section shell" id="comprar" aria-label="Compra y cotiza">
         <div className="section-heading"><div><span className="section-kicker">Compra con cuenta</span><h2>Elige, paga y<br /><em>listo.</em></h2></div></div>
         <div className="checkout-grid">
-          <article className="checkout-panel"><h3>Membresías</h3><p>Tu suscripción se activa al confirmarse el pago.</p>{levels.length ? levels.map((level) => <div className="purchase-row" key={level.id}><div><strong>{level.name}</strong><small>{level.description}</small></div><button onClick={() => subscribe(level.id)}>${level.monthlyPrice} / mes</button></div>) : <small>Cargando planes…</small>}</article>
-          <article className="checkout-panel"><h3>Licencias y servicios</h3><p>Office, VPN, dominios y servidores con pago por transferencia.</p>{products.length ? products.map((product) => <div className="purchase-row" key={product.id}><div><strong>{product.name}</strong><small>{product.description}</small></div><button onClick={() => buyProduct(product.id)}>Transferir ${product.price}</button></div>) : <small>Cargando productos…</small>}</article>
+          <article className="checkout-panel">
+            <div className="panel-heading"><div><h3>Membresías</h3><p>Tu suscripción se activa al confirmarse el pago.</p></div><button className="detail-button" type="button" onClick={() => setActiveGuide('memberships')}>Cómo funcionan</button></div>
+            {levels.length ? levels.map((level) => <div className="purchase-row" key={level.id}><div className="purchase-copy"><strong>{level.name}</strong><small>{level.description}</small></div><button onClick={() => subscribe(level.id)}>${level.monthlyPrice} / mes</button></div>) : <small>Cargando planes…</small>}
+          </article>
+          <article className="checkout-panel">
+            <div className="panel-heading"><div><h3>Licencias y servicios</h3><p>Office, VPN, dominios y servidores con pago por transferencia.</p></div><button className="detail-button" type="button" onClick={() => setActiveGuide('office')}>Guía de licencias</button></div>
+            {products.length ? products.map((product) => <div className="purchase-row" key={product.id}><div className="purchase-copy"><strong>{product.name}</strong><small>{product.description}</small><button className="product-detail-link" type="button" onClick={() => setActiveGuide(guideForProduct(product.type))}>Ver modalidad y condiciones</button></div><button onClick={() => buyProduct(product.id)}>Transferir ${product.price}</button></div>) : <small>Cargando productos…</small>}
+          </article>
         </div>
       </section>
 
       <section className="request-section shell" id="solicitudes">
-        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes de solicitar la transferencia.</p><div className="function-list">{botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); api<{ id: string }>('/bot-quotes', { method: 'POST', body: JSON.stringify({ funcionIds: selectedBotFunctions }) }).then((quote) => requestTransfer('BOT_QUOTE', quote.id)).catch((error: Error) => setNotice(error.message)); })}>Cotizar y transferir <ArrowUpRight size={17} /></button></article>
-        <OnlineOrderForm requireAccount={requireAccount} requestTransfer={requestTransfer} setNotice={setNotice} />
+        <article className="request-card"><span className="section-kicker">Bot de Telegram</span><h3>Cotiza tu automatización</h3><p>Selecciona las funciones que quieres. El total se congela antes de solicitar la transferencia.</p><button className="detail-button request-detail" type="button" onClick={() => setActiveGuide('telegram-bots')}>Qué incluye y cómo se entrega</button><div className="function-list">{botFunctions.map((item) => <label key={item.id}><input type="checkbox" checked={selectedBotFunctions.includes(item.id)} onChange={() => setSelectedBotFunctions((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} /><span>{item.name}<small>${item.basePrice} MXN</small></span></label>)}</div><button className="primary-button" onClick={() => requireAccount(() => { if (!selectedBotFunctions.length) return setNotice('Selecciona al menos una función para el bot.'); api<{ id: string }>('/bot-quotes', { method: 'POST', body: JSON.stringify({ funcionIds: selectedBotFunctions }) }).then((quote) => requestTransfer('BOT_QUOTE', quote.id)).catch((error: Error) => setNotice(error.message)); })}>Cotizar y transferir <ArrowUpRight size={17} /></button></article>
+        <OnlineOrderForm requireAccount={requireAccount} requestTransfer={requestTransfer} setNotice={setNotice} openGuide={() => setActiveGuide('online-orders')} />
       </section>
 
       <footer className="site-footer shell" id="ayuda"><div><a className="brand" href="#top"><span className="brand-mark">N</span><span>Nexo<span className="brand-dot">.</span></span></a><p>Servicios digitales para la vida real.</p></div><div className="footer-links"><a href="#servicios">Servicios</a><a href="#membresia">Membresías</a><a href="#solicitudes">Solicitudes</a><a href="mailto:hola@nexo.local">Contacto</a></div><span className="footer-year">© 2026 Nexo</span></footer>
       {notice && <div className="notice" role="status">{notice}<button aria-label="Cerrar" onClick={() => setNotice(null)}><X size={16} /></button></div>}
       {authMode && <AuthDialog mode={authMode} close={() => setAuthMode(null)} onSession={(session) => { localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken); setUser(session.user); setAuthMode(null); setNotice(`Bienvenida, ${session.user.name}. Tu cuenta está lista.`); }} />}
       {transferPayment && <TransferDialog payment={transferPayment} close={() => setTransferPayment(null)} onSubmitted={(message) => { setTransferPayment(null); setNotice(message); }} />}
+      {activeGuide && <ServiceGuideDialog guideKey={activeGuide} close={() => setActiveGuide(null)} />}
     </main>
   );
 }
 
-function OnlineOrderForm({ requireAccount, requestTransfer, setNotice }: { requireAccount: (action: () => void) => void; requestTransfer: (type: string, id: string) => Promise<void>; setNotice: (notice: string) => void }) {
+function OnlineOrderForm({ requireAccount, requestTransfer, setNotice, openGuide }: { requireAccount: (action: () => void) => void; requestTransfer: (type: string, id: string) => Promise<void>; setNotice: (notice: string) => void; openGuide: () => void }) {
   const [url, setUrl] = useState(''); const [amount, setAmount] = useState('');
   const submit = (event: FormEvent) => { event.preventDefault(); requireAccount(() => { api<{ id: string; totalAmount: number }>('/online-orders', { method: 'POST', body: JSON.stringify({ urlProducto: url, montoProducto: Number(amount) }) }).then((order) => requestTransfer('ONLINE_ORDER', order.id)).catch((error: Error) => setNotice(error.message)); }); };
-  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y validamos la transferencia antes de procesar tu pedido.</p><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit">Calcular transferencia <ArrowUpRight size={17} /></button></form></article>;
+  return <article className="request-card"><span className="section-kicker">Pedido online</span><h3>Lo compramos por ti</h3><p>Te mostramos la comisión del 15% y validamos la transferencia antes de procesar tu pedido.</p><button className="detail-button request-detail" type="button" onClick={openGuide}>Ver cálculo, alcance y condiciones</button><form onSubmit={submit}><label>Enlace del producto<input required type="url" value={url} placeholder="https://tienda.com/producto" onChange={(event) => setUrl(event.target.value)} /></label><label>Monto del producto (MXN)<input required min="1" type="number" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} /></label><button className="primary-button" type="submit">Calcular transferencia <ArrowUpRight size={17} /></button></form></article>;
 }
 
 function TransferDialog({ payment, close, onSubmitted }: { payment: TransferPayment; close: () => void; onSubmitted: (message: string) => void }) {
@@ -242,9 +255,9 @@ function AuthDialog({ mode, close, onSession }: { mode: AuthMode; close: () => v
   return <div className="modal-backdrop" role="presentation"><section className="auth-dialog" role="dialog" aria-modal="true" aria-label="Acceso a Nexo"><button className="modal-close" onClick={close} aria-label="Cerrar"><X size={18} /></button><span className="section-kicker">Tu espacio Nexo</span><h2>{currentMode === 'login' ? 'Qué bueno verte.' : 'Crea tu cuenta.'}</h2><form onSubmit={submit}>{currentMode === 'register' && <label>Nombre<input required value={name} onChange={(event) => setName(event.target.value)} /></label>}<label>Correo<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Contraseña<input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<button className="primary-button" disabled={loading} type="submit">{loading ? 'Un momento…' : currentMode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'} <ArrowUpRight size={17} /></button></form><button className="switch-auth" onClick={() => setCurrentMode(currentMode === 'login' ? 'register' : 'login')}>{currentMode === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}</button></section></div>;
 }
 
-function ServiceCard({ service, index }: { service: ServiceItem; index: number }) {
+function ServiceCard({ service, index, onLearn }: { service: ServiceItem; index: number; onLearn: () => void }) {
   const Icon = categoryIcons[service.category];
-  return <article className={`service-card accent-${service.accent}`} style={{ animationDelay: `${index * 70}ms` }}><div className="service-card-top"><span className="service-icon"><Icon size={18} /></span><span className="service-category">{categoryLabels[service.category]}</span><ArrowUpRight className="card-arrow" size={18} /></div><div className="service-art"><div className="art-grid" /><span className="art-orb orb-one" /><span className="art-orb orb-two" /><Icon className="art-icon" size={62} strokeWidth={1.25} /></div><h3>{service.name}</h3><p>{service.description}</p><div className="service-card-bottom"><strong>{service.priceLabel}</strong><a href="#ayuda">Conocer más <ChevronRight size={15} /></a></div></article>;
+  return <article className={`service-card accent-${service.accent}`} style={{ animationDelay: `${index * 70}ms` }}><div className="service-card-top"><span className="service-icon"><Icon size={18} /></span><span className="service-category">{categoryLabels[service.category]}</span><ArrowUpRight className="card-arrow" size={18} /></div><div className="service-art"><div className="art-grid" /><span className="art-orb orb-one" /><span className="art-orb orb-two" /><Icon className="art-icon" size={62} strokeWidth={1.25} /></div><h3>{service.name}</h3><p>{service.description}</p><div className="service-card-bottom"><strong>{service.priceLabel}</strong><button type="button" onClick={onLearn}>Conocer más <ChevronRight size={15} /></button></div></article>;
 }
 
 export default App;
